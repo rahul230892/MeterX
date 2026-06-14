@@ -72,10 +72,34 @@ data class UsageStatus(
     val level: UsageLevel,
 )
 
+data class DailyConsumption(
+    val unitsUsed: Double,
+    val elapsedDays: Long,
+    val averagePerDay: Double,
+)
+
 enum class UsageLevel {
     NORMAL,
     NEAR_LIMIT,
     OVER_LIMIT,
+}
+
+fun MeterWithReadings.dailyConsumptionFor(reading: ReadingEntity): DailyConsumption? {
+    val previous = readings
+        .asSequence()
+        .filter { it.readingDate < reading.readingDate }
+        .maxWithOrNull(
+            compareBy<ReadingEntity> { it.readingDate }
+                .thenBy { it.createdAt },
+        ) ?: return null
+    val elapsedDays = reading.readingDate - previous.readingDate
+    val unitsUsed = reading.value - previous.value
+    if (elapsedDays <= 0 || unitsUsed < 0) return null
+    return DailyConsumption(
+        unitsUsed = unitsUsed,
+        elapsedDays = elapsedDays,
+        averagePerDay = unitsUsed / elapsedDays,
+    )
 }
 
 fun MeterWithReadings.usageStatus(): UsageStatus? {

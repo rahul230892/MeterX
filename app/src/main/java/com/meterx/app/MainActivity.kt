@@ -10,7 +10,8 @@ import com.meterx.app.ui.MeterXTheme
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MeterViewModel by viewModels {
-        MeterViewModel.Factory((application as MeterXApplication).repository)
+        val app = application as MeterXApplication
+        MeterViewModel.Factory(app.repository, app.reminderManager, app.authSession)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

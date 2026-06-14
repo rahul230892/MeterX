@@ -21,6 +21,9 @@ interface MeterDao {
     @Insert
     suspend fun insertMeter(meter: MeterEntity): Long
 
+    @Insert
+    suspend fun insertMeters(meters: List<MeterEntity>): List<Long>
+
     @Update
     suspend fun updateMeter(meter: MeterEntity)
 
@@ -30,9 +33,18 @@ interface MeterDao {
     @Insert
     suspend fun insertReading(reading: ReadingEntity): Long
 
+    @Insert
+    suspend fun insertReadings(readings: List<ReadingEntity>)
+
     @Update
     suspend fun updateReading(reading: ReadingEntity)
 
     @Delete
     suspend fun deleteReading(reading: ReadingEntity)
+
+    @Query("DELETE FROM readings")
+    suspend fun deleteAllReadings()
+
+    @Query("DELETE FROM meters")
+    suspend fun deleteAllMeters()
 }

@@ -1,5 +1,10 @@
 package com.meterx.app.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -26,13 +31,19 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.FileDownload
+import androidx.compose.material.icons.rounded.FileUpload
 import androidx.compose.material.icons.rounded.GasMeter
+import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Opacity
+import androidx.compose.material.icons.rounded.CloudSync
+import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -48,17 +59,23 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimePicker
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -69,33 +86,84 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.core.content.ContextCompat
 import com.meterx.app.MeterViewModel
 import com.meterx.app.data.MeterEntity
 import com.meterx.app.data.MeterType
 import com.meterx.app.data.MeterWithReadings
 import com.meterx.app.data.ReadingEntity
 import com.meterx.app.data.UsageLevel
+import com.meterx.app.data.dailyConsumptionFor
 import com.meterx.app.data.usageStatus
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.flow.collectLatest
 import kotlin.math.roundToInt
 
 @Composable
 fun MeterXApp(viewModel: MeterViewModel) {
+    val authState by viewModel.authState.collectAsStateWithLifecycle()
     val meters by viewModel.meters.collectAsStateWithLifecycle()
+    val importPreview by viewModel.importPreview.collectAsStateWithLifecycle()
+    val reminderSettings by viewModel.reminderSettings.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val snackbarHostState = remember { SnackbarHostState() }
     var selectedMeterId by rememberSaveable { mutableStateOf<Long?>(null) }
     val selectedMeter = meters.firstOrNull { it.meter.id == selectedMeterId }
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        uri?.let(viewModel::exportData)
+    }
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        uri?.let(viewModel::previewImport)
+    }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) viewModel.setReminderEnabled(true)
+        else viewModel.notificationPermissionDenied()
+    }
+
+    LaunchedEffect(viewModel) {
+        viewModel.messages.collectLatest(snackbarHostState::showSnackbar)
+    }
+
+    if (!authState.initialized || (authState.loading && authState.user != null)) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+        return
+    }
+
+    val authenticatedUser = authState.user
+    if (authenticatedUser == null) {
+        AuthScreen(
+            loading = authState.loading,
+            error = authState.error,
+            onLogin = viewModel::login,
+            onRegister = viewModel::register,
+            onClearError = viewModel::clearAuthError,
+        )
+        return
+    }
 
     if (selectedMeter != null) {
         MeterDetailScreen(
             item = selectedMeter,
+            snackbarHostState = snackbarHostState,
             onBack = { selectedMeterId = null },
             onAddReading = { value, date, billed ->
                 viewModel.addReading(selectedMeter.meter, value, date, billed)
@@ -111,10 +179,163 @@ fun MeterXApp(viewModel: MeterViewModel) {
     } else {
         MeterListScreen(
             meters = meters,
+            snackbarHostState = snackbarHostState,
             onOpenMeter = { selectedMeterId = it.meter.id },
             onAddMeter = viewModel::addMeter,
             onDeleteMeter = viewModel::deleteMeter,
+            onExport = {
+                exportLauncher.launch("meterx-backup-${LocalDate.now()}.json")
+            },
+            onImport = {
+                importLauncher.launch(arrayOf("application/json", "text/json", "text/plain"))
+            },
+            username = authenticatedUser.username,
+            onSync = viewModel::syncNow,
+            onLogout = viewModel::logout,
+            reminderSettings = reminderSettings,
+            onReminderEnabledChange = { enabled ->
+                if (!enabled) {
+                    viewModel.setReminderEnabled(false)
+                } else if (
+                    Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                    ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.POST_NOTIFICATIONS,
+                    ) == PackageManager.PERMISSION_GRANTED
+                ) {
+                    viewModel.setReminderEnabled(true)
+                } else {
+                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+            },
+            onReminderTimeChange = viewModel::setReminderTime,
         )
+    }
+
+    importPreview?.let { preview ->
+        AlertDialog(
+            onDismissRequest = viewModel::dismissImport,
+            title = { Text("Replace current app data?") },
+            text = {
+                Text(
+                    "This file contains ${preview.meterCount} meters and " +
+                        "${preview.readingCount} readings. Importing will replace all data " +
+                        "currently stored in MeterX on this device.",
+                )
+            },
+            confirmButton = {
+                Button(onClick = viewModel::confirmImport) { Text("Import and replace") }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::dismissImport) { Text("Cancel") }
+            },
+        )
+    }
+}
+
+@Composable
+private fun AuthScreen(
+    loading: Boolean,
+    error: String?,
+    onLogin: (String, String) -> Unit,
+    onRegister: (String, String) -> Unit,
+    onClearError: () -> Unit,
+) {
+    var username by rememberSaveable { mutableStateOf("") }
+    var password by rememberSaveable { mutableStateOf("") }
+    var registering by rememberSaveable { mutableStateOf(false) }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(28.dp),
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Text(
+                    text = "MeterX",
+                    style = MaterialTheme.typography.headlineLarge,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = if (registering) {
+                        "Create an account to securely save your meter records."
+                    } else {
+                        "Sign in to view and sync your meter records."
+                    },
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = username,
+                    onValueChange = {
+                        username = it
+                        onClearError()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Username") },
+                    singleLine = true,
+                    enabled = !loading,
+                )
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = {
+                        password = it
+                        onClearError()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Password") },
+                    singleLine = true,
+                    enabled = !loading,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    visualTransformation = PasswordVisualTransformation(),
+                    supportingText = if (registering) {
+                        { Text("Use at least 8 characters.") }
+                    } else {
+                        null
+                    },
+                )
+                error?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error)
+                }
+                Button(
+                    onClick = {
+                        if (registering) onRegister(username, password)
+                        else onLogin(username, password)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !loading && username.trim().length >= 3 && password.length >= 8,
+                ) {
+                    if (loading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                        )
+                    } else {
+                        Text(if (registering) "Create account" else "Sign in")
+                    }
+                }
+                TextButton(
+                    onClick = {
+                        registering = !registering
+                        onClearError()
+                    },
+                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                    enabled = !loading,
+                ) {
+                    Text(
+                        if (registering) "Already registered? Sign in"
+                        else "New to MeterX? Create account",
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -122,15 +343,26 @@ fun MeterXApp(viewModel: MeterViewModel) {
 @Composable
 private fun MeterListScreen(
     meters: List<MeterWithReadings>,
+    snackbarHostState: SnackbarHostState,
     onOpenMeter: (MeterWithReadings) -> Unit,
     onAddMeter: (String, MeterType, String, String?, Double?) -> Unit,
     onDeleteMeter: (MeterEntity) -> Unit,
+    onExport: () -> Unit,
+    onImport: () -> Unit,
+    username: String,
+    onSync: () -> Unit,
+    onLogout: () -> Unit,
+    reminderSettings: com.meterx.app.reminder.ReminderSettings,
+    onReminderEnabledChange: (Boolean) -> Unit,
+    onReminderTimeChange: (Int, Int) -> Unit,
 ) {
     var showAddMeter by rememberSaveable { mutableStateOf(false) }
+    var showTimePicker by rememberSaveable { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<MeterEntity?>(null) }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
             ExtendedFloatingActionButton(
                 onClick = { showAddMeter = true },
@@ -162,7 +394,39 @@ private fun MeterListScreen(
                         text = "Your utilities, clear and under control.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = username,
+                            modifier = Modifier.weight(1f),
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        IconButton(onClick = onSync) {
+                            Icon(Icons.Rounded.CloudSync, contentDescription = "Sync now")
+                        }
+                        IconButton(onClick = onLogout) {
+                            Icon(
+                                Icons.AutoMirrored.Rounded.Logout,
+                                contentDescription = "Sign out",
+                            )
+                        }
+                    }
                 }
+            }
+            item {
+                ReminderCard(
+                    settings = reminderSettings,
+                    onEnabledChange = onReminderEnabledChange,
+                    onChooseTime = { showTimePicker = true },
+                )
+            }
+            item {
+                DataTransferCard(
+                    onExport = onExport,
+                    onImport = onImport,
+                )
             }
             if (meters.isEmpty()) {
                 item { EmptyMetersCard(onAdd = { showAddMeter = true }) }
@@ -177,6 +441,18 @@ private fun MeterListScreen(
                 item { Spacer(Modifier.height(72.dp)) }
             }
         }
+    }
+
+    if (showTimePicker) {
+        ReminderTimeDialog(
+            hour = reminderSettings.hour,
+            minute = reminderSettings.minute,
+            onDismiss = { showTimePicker = false },
+            onConfirm = { hour, minute ->
+                onReminderTimeChange(hour, minute)
+                showTimePicker = false
+            },
+        )
     }
 
     if (showAddMeter) {
@@ -199,6 +475,165 @@ private fun MeterListScreen(
                 pendingDelete = null
             },
         )
+    }
+}
+
+@Composable
+private fun ReminderCard(
+    settings: com.meterx.app.reminder.ReminderSettings,
+    onEnabledChange: (Boolean) -> Unit,
+    onChooseTime: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .background(
+                            MaterialTheme.colorScheme.primaryContainer,
+                            RoundedCornerShape(13.dp),
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Rounded.NotificationsActive,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "Daily reading reminder",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        if (settings.enabled) "Every morning at ${formatReminderTime(settings.hour, settings.minute)}"
+                        else "Get a morning notification to update readings.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+                Switch(
+                    checked = settings.enabled,
+                    onCheckedChange = onEnabledChange,
+                )
+            }
+            OutlinedButton(
+                onClick = onChooseTime,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(
+                    Icons.Rounded.Schedule,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("Reminder time: ${formatReminderTime(settings.hour, settings.minute)}")
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ReminderTimeDialog(
+    hour: Int,
+    minute: Int,
+    onDismiss: () -> Unit,
+    onConfirm: (Int, Int) -> Unit,
+) {
+    val state = rememberTimePickerState(
+        initialHour = hour,
+        initialMinute = minute,
+        is24Hour = false,
+    )
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Choose reminder time") },
+        text = {
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center,
+            ) {
+                TimePicker(state = state)
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onConfirm(state.hour, state.minute) }) {
+                Text("Save time")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
+}
+
+@Composable
+private fun DataTransferCard(
+    onExport: () -> Unit,
+    onImport: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+        ),
+        shape = RoundedCornerShape(22.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                "Data transfer",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                "Export all meters and readings to a file, or restore a MeterX file from another device.",
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                OutlinedButton(
+                    onClick = onExport,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(
+                        Icons.Rounded.FileUpload,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("Export")
+                }
+                Button(
+                    onClick = onImport,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(
+                        Icons.Rounded.FileDownload,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("Import")
+                }
+            }
+        }
     }
 }
 
@@ -415,6 +850,7 @@ private fun AddMeterSheet(
 @Composable
 private fun MeterDetailScreen(
     item: MeterWithReadings,
+    snackbarHostState: SnackbarHostState,
     onBack: () -> Unit,
     onAddReading: (Double, Long, Boolean) -> Unit,
     onUpdateReading: (ReadingEntity, Double, Long, Boolean) -> Unit,
@@ -428,6 +864,7 @@ private fun MeterDetailScreen(
     val latestBilledReading = item.latestReading?.takeIf { it.isBilled }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
@@ -504,6 +941,7 @@ private fun MeterDetailScreen(
                 items(item.sortedReadings, key = { it.id }) { reading ->
                     ReadingRow(
                         reading = reading,
+                        dailyConsumption = item.dailyConsumptionFor(reading),
                         onEdit = { editingReading = reading },
                         onDelete = { pendingDelete = reading },
                     )
@@ -628,6 +1066,7 @@ private fun MeterSummary(item: MeterWithReadings) {
 @Composable
 private fun ReadingRow(
     reading: ReadingEntity,
+    dailyConsumption: com.meterx.app.data.DailyConsumption?,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -651,6 +1090,16 @@ private fun ReadingRow(
                     formatDate(reading.readingDate),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                dailyConsumption?.let { consumption ->
+                    Text(
+                        "${formatUnit(consumption.unitsUsed)} units in " +
+                            "${consumption.elapsedDays} ${if (consumption.elapsedDays == 1L) "day" else "days"}" +
+                            "  •  ${formatUnit(consumption.averagePerDay)} units/day",
+                        color = MaterialTheme.colorScheme.secondary,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
             }
             if (reading.isBilled) {
                 Icon(
@@ -824,6 +1273,9 @@ private fun formatUnit(value: Double): String =
 
 private fun formatDate(epochDay: Long): String =
     LocalDate.ofEpochDay(epochDay).format(DateTimeFormatter.ofPattern("d MMM yyyy"))
+
+private fun formatReminderTime(hour: Int, minute: Int): String =
+    LocalTime.of(hour, minute).format(DateTimeFormatter.ofPattern("h:mm a"))
 
 private fun String.filterDecimal(): String {
     var dotSeen = false

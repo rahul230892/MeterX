@@ -13,11 +13,16 @@ android {
         applicationId = "com.meterx.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 4
+        versionName = "1.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
+        buildConfigField(
+            "String",
+            "API_BASE_URL",
+            "\"${project.findProperty("METERX_API_BASE_URL") ?: "https://meterx-backend.onrender.com"}\"",
+        )
     }
 
     buildFeatures {
@@ -50,6 +55,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7")
+    implementation("androidx.work:work-runtime-ktx:2.10.0")
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.ui:ui-tooling-preview")
