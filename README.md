@@ -1,10 +1,13 @@
 # MeterX
 
 MeterX is a native Android app for privately tracking electricity, water, and
-gas meters. It is built with Kotlin, Jetpack Compose, Material 3, and Room.
+gas meters. It is built with Kotlin, Jetpack Compose, Material 3, Room, and a
+MongoDB-backed cloud sync service.
 
 ## Features
 
+- Register and sign in with a securely hashed account password.
+- Store the authenticated session in encrypted Android preferences.
 - Add electricity, water, and gas meters.
 - Require a nickname and meter number; consumer number is optional.
 - Configure a free-unit allowance for electricity meters.
@@ -21,6 +24,22 @@ gas meters. It is built with Kotlin, Jetpack Compose, Material 3, and Room.
 - Store data in the local Room database and mirror every change to
   `files/meterx_backup.json`.
 - Include the database and JSON mirror in Android backup/device transfer.
+- Automatically upload every meter and reading add, edit, delete, reset, and
+  import operation to the signed-in user's cloud account.
+- Show an animated cloud icon while syncing, a completion icon when current,
+  and a retry state if an upload fails.
+- Keep reminders, data transfer, and account controls together in Settings.
+
+## Cloud sync
+
+Cloud upload is automatic. Users do not need to press the cloud button after
+changing a meter or reading. The button remains available as a manual retry if
+the previous upload failed because the device was offline or the free backend
+was waking from sleep.
+
+Each account can access only its own meters and readings. Local Room data
+continues to provide offline access, while the backend stores cloud snapshots
+in MongoDB Atlas.
 
 ## Free-unit cycle
 
@@ -58,13 +77,22 @@ Do not uninstall the app or clear its storage before installing the update.
 
 ## Moving data between devices
 
-Use **Data transfer > Export** to save a `meterx-backup-YYYY-MM-DD.json` file.
-Send that file to another device, install MeterX, and choose
-**Data transfer > Import**. The app validates the file and shows its meter and
-reading counts before replacing the data on that device.
+Open **Settings > Data transfer**, then use **Export** to save a
+`meterx-backup-YYYY-MM-DD.json` file. Send that file to another device, install
+MeterX, and choose **Import**. The app validates the file and shows its meter
+and reading counts before replacing the data on that device.
 
 ## Backend
 
 The separate Node.js and MongoDB sync API is in [`backend/`](backend/).
 See [`backend/README.md`](backend/README.md) for MongoDB configuration,
 authentication, sync endpoints, and local development commands.
+
+Production health endpoint:
+
+```text
+https://meterx-backend.onrender.com/health
+```
+
+The Render free service may sleep during inactivity, so its first request can
+take longer while the service starts.
