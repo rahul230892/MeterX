@@ -29,6 +29,12 @@ class MeterViewModel(
     private val reminderManager: ReminderManager,
     private val authSession: AuthSession,
 ) : ViewModel() {
+    enum class SyncStatus {
+        SYNCED,
+        SYNCING,
+        ERROR,
+    }
+
     data class AuthUiState(
         val user: AuthUser? = null,
         val loading: Boolean = false,
@@ -40,6 +46,8 @@ class MeterViewModel(
     val authState: StateFlow<AuthUiState> = _authState.asStateFlow()
     private val _importPreview = MutableStateFlow<ImportPreview?>(null)
     val importPreview: StateFlow<ImportPreview?> = _importPreview.asStateFlow()
+    private val _syncStatus = MutableStateFlow(SyncStatus.SYNCED)
+    val syncStatus: StateFlow<SyncStatus> = _syncStatus.asStateFlow()
 
     private val _messages = MutableSharedFlow<String>()
     val messages: SharedFlow<String> = _messages.asSharedFlow()
@@ -87,12 +95,15 @@ class MeterViewModel(
     fun logout() = viewModelScope.launch {
         repository.logout()
         _authState.value = AuthUiState(initialized = true)
+        _syncStatus.value = SyncStatus.SYNCED
     }
 
     fun syncNow() = viewModelScope.launch {
-        runCatching { repository.syncNow() }
-            .onSuccess { _messages.emit("Cloud data is up to date.") }
-            .onFailure { _messages.emit(it.message ?: "Cloud sync failed.") }
+        syncOperation(
+            action = repository::syncNow,
+            failureMessage = "Cloud sync failed.",
+            showSuccessMessage = true,
+        )
     }
 
     fun clearAuthError() {
@@ -106,20 +117,22 @@ class MeterViewModel(
         consumerNumber: String?,
         freeUnits: Double?,
     ) = viewModelScope.launch {
-        repository.addMeter(nickname, type, meterNumber, consumerNumber, freeUnits)
+        syncOperation {
+            repository.addMeter(nickname, type, meterNumber, consumerNumber, freeUnits)
+        }
     }
 
     fun deleteMeter(meter: MeterEntity) = viewModelScope.launch {
-        repository.deleteMeter(meter)
+        syncOperation { repository.deleteMeter(meter) }
     }
 
     fun addReading(meter: MeterEntity, value: Double, date: Long, isBilled: Boolean) =
         viewModelScope.launch {
-            repository.addReading(meter, value, date, isBilled)
+            syncOperation { repository.addReading(meter, value, date, isBilled) }
         }
 
     fun deleteReading(reading: ReadingEntity) = viewModelScope.launch {
-        repository.deleteReading(reading)
+        syncOperation { repository.deleteReading(reading) }
     }
 
     fun updateReading(
@@ -129,12 +142,14 @@ class MeterViewModel(
         date: Long,
         isBilled: Boolean,
     ) = viewModelScope.launch {
-        repository.updateReading(meter, reading, value, date, isBilled)
+        syncOperation {
+            repository.updateReading(meter, reading, value, date, isBilled)
+        }
     }
 
     fun resetFreeUnits(meter: MeterEntity, billedReading: ReadingEntity) =
         viewModelScope.launch {
-            repository.resetFreeUnits(meter, billedReading)
+            syncOperation { repository.resetFreeUnits(meter, billedReading) }
         }
 
     fun exportData(uri: Uri) = viewModelScope.launch {
@@ -155,12 +170,17 @@ class MeterViewModel(
 
     fun confirmImport() = viewModelScope.launch {
         val preview = _importPreview.value ?: return@launch
+        _syncStatus.value = SyncStatus.SYNCING
         runCatching { repository.importData(preview) }
             .onSuccess {
+                _syncStatus.value = SyncStatus.SYNCED
                 _importPreview.value = null
                 _messages.emit("Imported ${preview.meterCount} meters and ${preview.readingCount} readings.")
             }
-            .onFailure { _messages.emit(it.message ?: "Import failed.") }
+            .onFailure {
+                _syncStatus.value = SyncStatus.ERROR
+                _messages.emit(it.message ?: "Import failed.")
+            }
     }
 
     fun setReminderEnabled(enabled: Boolean) {
@@ -186,6 +206,7 @@ class MeterViewModel(
         _authState.value = _authState.value.copy(loading = true, error = null)
         runCatching { action() }
             .onSuccess { user ->
+                _syncStatus.value = SyncStatus.SYNCED
                 _authState.value = AuthUiState(user = user, initialized = true)
             }
             .onFailure { error ->
@@ -193,6 +214,25 @@ class MeterViewModel(
                     initialized = true,
                     error = error.message ?: "Authentication failed.",
                 )
+            }
+    }
+
+    private suspend fun syncOperation(
+        failureMessage: String = "Saved locally, but cloud sync failed.",
+        showSuccessMessage: Boolean = false,
+        action: suspend () -> Unit,
+    ) {
+        _syncStatus.value = SyncStatus.SYNCING
+        runCatching { action() }
+            .onSuccess {
+                _syncStatus.value = SyncStatus.SYNCED
+                if (showSuccessMessage) {
+                    _messages.emit("Cloud data is up to date.")
+                }
+            }
+            .onFailure {
+                _syncStatus.value = SyncStatus.ERROR
+                _messages.emit(it.message ?: failureMessage)
             }
     }
 

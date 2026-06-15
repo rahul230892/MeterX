@@ -6,6 +6,11 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -43,6 +48,9 @@ import androidx.compose.material.icons.rounded.GasMeter
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Opacity
 import androidx.compose.material.icons.rounded.CloudSync
+import androidx.compose.material.icons.rounded.CloudDone
+import androidx.compose.material.icons.rounded.CloudOff
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material3.AlertDialog
@@ -85,6 +93,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -116,9 +125,11 @@ fun MeterXApp(viewModel: MeterViewModel) {
     val meters by viewModel.meters.collectAsStateWithLifecycle()
     val importPreview by viewModel.importPreview.collectAsStateWithLifecycle()
     val reminderSettings by viewModel.reminderSettings.collectAsStateWithLifecycle()
+    val syncStatus by viewModel.syncStatus.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     var selectedMeterId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var showSettings by rememberSaveable { mutableStateOf(false) }
     val selectedMeter = meters.firstOrNull { it.meter.id == selectedMeterId }
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json"),
@@ -160,7 +171,40 @@ fun MeterXApp(viewModel: MeterViewModel) {
         return
     }
 
-    if (selectedMeter != null) {
+    if (showSettings) {
+        SettingsScreen(
+            snackbarHostState = snackbarHostState,
+            username = authenticatedUser.username,
+            reminderSettings = reminderSettings,
+            onBack = { showSettings = false },
+            onExport = {
+                exportLauncher.launch("meterx-backup-${LocalDate.now()}.json")
+            },
+            onImport = {
+                importLauncher.launch(arrayOf("application/json", "text/json", "text/plain"))
+            },
+            onLogout = {
+                showSettings = false
+                viewModel.logout()
+            },
+            onReminderEnabledChange = { enabled ->
+                if (!enabled) {
+                    viewModel.setReminderEnabled(false)
+                } else if (
+                    Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                    ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.POST_NOTIFICATIONS,
+                    ) == PackageManager.PERMISSION_GRANTED
+                ) {
+                    viewModel.setReminderEnabled(true)
+                } else {
+                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+            },
+            onReminderTimeChange = viewModel::setReminderTime,
+        )
+    } else if (selectedMeter != null) {
         MeterDetailScreen(
             item = selectedMeter,
             snackbarHostState = snackbarHostState,
@@ -183,32 +227,10 @@ fun MeterXApp(viewModel: MeterViewModel) {
             onOpenMeter = { selectedMeterId = it.meter.id },
             onAddMeter = viewModel::addMeter,
             onDeleteMeter = viewModel::deleteMeter,
-            onExport = {
-                exportLauncher.launch("meterx-backup-${LocalDate.now()}.json")
-            },
-            onImport = {
-                importLauncher.launch(arrayOf("application/json", "text/json", "text/plain"))
-            },
             username = authenticatedUser.username,
+            syncStatus = syncStatus,
             onSync = viewModel::syncNow,
-            onLogout = viewModel::logout,
-            reminderSettings = reminderSettings,
-            onReminderEnabledChange = { enabled ->
-                if (!enabled) {
-                    viewModel.setReminderEnabled(false)
-                } else if (
-                    Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-                    ContextCompat.checkSelfPermission(
-                        context,
-                        Manifest.permission.POST_NOTIFICATIONS,
-                    ) == PackageManager.PERMISSION_GRANTED
-                ) {
-                    viewModel.setReminderEnabled(true)
-                } else {
-                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                }
-            },
-            onReminderTimeChange = viewModel::setReminderTime,
+            onOpenSettings = { showSettings = true },
         )
     }
 
@@ -347,17 +369,12 @@ private fun MeterListScreen(
     onOpenMeter: (MeterWithReadings) -> Unit,
     onAddMeter: (String, MeterType, String, String?, Double?) -> Unit,
     onDeleteMeter: (MeterEntity) -> Unit,
-    onExport: () -> Unit,
-    onImport: () -> Unit,
     username: String,
+    syncStatus: MeterViewModel.SyncStatus,
     onSync: () -> Unit,
-    onLogout: () -> Unit,
-    reminderSettings: com.meterx.app.reminder.ReminderSettings,
-    onReminderEnabledChange: (Boolean) -> Unit,
-    onReminderTimeChange: (Int, Int) -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     var showAddMeter by rememberSaveable { mutableStateOf(false) }
-    var showTimePicker by rememberSaveable { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<MeterEntity?>(null) }
 
     Scaffold(
@@ -403,30 +420,15 @@ private fun MeterListScreen(
                             modifier = Modifier.weight(1f),
                             color = MaterialTheme.colorScheme.primary,
                         )
-                        IconButton(onClick = onSync) {
-                            Icon(Icons.Rounded.CloudSync, contentDescription = "Sync now")
-                        }
-                        IconButton(onClick = onLogout) {
-                            Icon(
-                                Icons.AutoMirrored.Rounded.Logout,
-                                contentDescription = "Sign out",
-                            )
+                        CloudSyncButton(
+                            status = syncStatus,
+                            onClick = onSync,
+                        )
+                        IconButton(onClick = onOpenSettings) {
+                            Icon(Icons.Rounded.Settings, contentDescription = "Settings")
                         }
                     }
                 }
-            }
-            item {
-                ReminderCard(
-                    settings = reminderSettings,
-                    onEnabledChange = onReminderEnabledChange,
-                    onChooseTime = { showTimePicker = true },
-                )
-            }
-            item {
-                DataTransferCard(
-                    onExport = onExport,
-                    onImport = onImport,
-                )
             }
             if (meters.isEmpty()) {
                 item { EmptyMetersCard(onAdd = { showAddMeter = true }) }
@@ -441,18 +443,6 @@ private fun MeterListScreen(
                 item { Spacer(Modifier.height(72.dp)) }
             }
         }
-    }
-
-    if (showTimePicker) {
-        ReminderTimeDialog(
-            hour = reminderSettings.hour,
-            minute = reminderSettings.minute,
-            onDismiss = { showTimePicker = false },
-            onConfirm = { hour, minute ->
-                onReminderTimeChange(hour, minute)
-                showTimePicker = false
-            },
-        )
     }
 
     if (showAddMeter) {
@@ -473,6 +463,162 @@ private fun MeterListScreen(
             onConfirm = {
                 onDeleteMeter(meter)
                 pendingDelete = null
+            },
+        )
+    }
+}
+
+@Composable
+private fun CloudSyncButton(
+    status: MeterViewModel.SyncStatus,
+    onClick: () -> Unit,
+) {
+    val rotation = if (status == MeterViewModel.SyncStatus.SYNCING) {
+        val transition = rememberInfiniteTransition(label = "cloud-sync")
+        transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(900, easing = LinearEasing),
+            ),
+            label = "cloud-sync-rotation",
+        ).value
+    } else {
+        0f
+    }
+    val icon = when (status) {
+        MeterViewModel.SyncStatus.SYNCED -> Icons.Rounded.CloudDone
+        MeterViewModel.SyncStatus.SYNCING -> Icons.Rounded.CloudSync
+        MeterViewModel.SyncStatus.ERROR -> Icons.Rounded.CloudOff
+    }
+    val description = when (status) {
+        MeterViewModel.SyncStatus.SYNCED -> "Cloud data synced"
+        MeterViewModel.SyncStatus.SYNCING -> "Cloud sync in progress"
+        MeterViewModel.SyncStatus.ERROR -> "Cloud sync failed. Tap to retry"
+    }
+
+    IconButton(
+        onClick = onClick,
+        enabled = status != MeterViewModel.SyncStatus.SYNCING,
+    ) {
+        Icon(
+            icon,
+            contentDescription = description,
+            modifier = Modifier.graphicsLayer { rotationZ = rotation },
+            tint = if (status == MeterViewModel.SyncStatus.ERROR) {
+                MaterialTheme.colorScheme.error
+            } else {
+                MaterialTheme.colorScheme.primary
+            },
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SettingsScreen(
+    snackbarHostState: SnackbarHostState,
+    username: String,
+    reminderSettings: com.meterx.app.reminder.ReminderSettings,
+    onBack: () -> Unit,
+    onExport: () -> Unit,
+    onImport: () -> Unit,
+    onLogout: () -> Unit,
+    onReminderEnabledChange: (Boolean) -> Unit,
+    onReminderTimeChange: (Int, Int) -> Unit,
+) {
+    var showTimePicker by rememberSaveable { mutableStateOf(false) }
+
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        topBar = {
+            TopAppBar(
+                title = { Text("Settings") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            Icons.AutoMirrored.Rounded.ArrowBack,
+                            contentDescription = "Back",
+                        )
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+            contentPadding = PaddingValues(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            item {
+                Text(
+                    "Notifications",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            item {
+                ReminderCard(
+                    settings = reminderSettings,
+                    onEnabledChange = onReminderEnabledChange,
+                    onChooseTime = { showTimePicker = true },
+                )
+            }
+            item {
+                Text(
+                    "Data",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            item {
+                DataTransferCard(onExport = onExport, onImport = onImport)
+            }
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(22.dp),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(18.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Text(
+                            "Account",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            username,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        OutlinedButton(
+                            onClick = onLogout,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Rounded.Logout,
+                                contentDescription = null,
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text("Sign out")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showTimePicker) {
+        ReminderTimeDialog(
+            hour = reminderSettings.hour,
+            minute = reminderSettings.minute,
+            onDismiss = { showTimePicker = false },
+            onConfirm = { hour, minute ->
+                onReminderTimeChange(hour, minute)
+                showTimePicker = false
             },
         )
     }
