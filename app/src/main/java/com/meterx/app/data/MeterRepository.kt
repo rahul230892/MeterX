@@ -54,7 +54,10 @@ class MeterRepository(
                     isBilled = isBilled,
                 ),
             )
-            if (meter.type == MeterType.ELECTRICITY && meter.cycleBaseline == null) {
+            if (
+                meter.type == MeterType.ELECTRICITY &&
+                (meter.cycleBaseline == null || isBilled)
+            ) {
                 dao.updateMeter(meter.copy(cycleBaseline = value))
             }
         }
@@ -83,7 +86,7 @@ class MeterRepository(
             )
             if (
                 meter.type == MeterType.ELECTRICITY &&
-                meter.cycleBaseline == reading.value
+                (isBilled || meter.cycleBaseline == reading.value)
             ) {
                 dao.updateMeter(meter.copy(cycleBaseline = value))
             }

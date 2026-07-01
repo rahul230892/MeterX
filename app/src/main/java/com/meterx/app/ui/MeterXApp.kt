@@ -1320,7 +1320,7 @@ private fun ReadingDialog(
                     Column(Modifier.weight(1f)) {
                         Text("Bill made through this reading")
                         Text(
-                            "Enables a free-unit cycle reset.",
+                            "Resets the free-unit cycle when saved.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
