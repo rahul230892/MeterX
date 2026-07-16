@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.meterx.app.data.AuthSession
+import com.meterx.app.data.AuthExpiredException
 import com.meterx.app.data.AuthUser
 import com.meterx.app.data.MeterEntity
 import com.meterx.app.data.MeterRepository
@@ -74,11 +75,18 @@ class MeterViewModel(
                         )
                     }
                     .onFailure {
-                        _authState.value = AuthUiState(
-                            user = existingUser,
-                            initialized = true,
-                            error = it.message ?: "Could not refresh cloud data.",
-                        )
+                        if (it is AuthExpiredException) {
+                            _authState.value = AuthUiState(
+                                initialized = true,
+                                error = "Session expired. Please sign in again.",
+                            )
+                        } else {
+                            _authState.value = AuthUiState(
+                                user = existingUser,
+                                initialized = true,
+                                error = it.message ?: "Could not refresh cloud data.",
+                            )
+                        }
                     }
             }
         }
@@ -232,7 +240,15 @@ class MeterViewModel(
             }
             .onFailure {
                 _syncStatus.value = SyncStatus.ERROR
-                _messages.emit(it.message ?: failureMessage)
+                if (it is AuthExpiredException) {
+                    _authState.value = AuthUiState(
+                        initialized = true,
+                        error = "Session expired. Please sign in again.",
+                    )
+                    _messages.emit("Session expired. Please sign in again.")
+                } else {
+                    _messages.emit(it.message ?: failureMessage)
+                }
             }
     }
 

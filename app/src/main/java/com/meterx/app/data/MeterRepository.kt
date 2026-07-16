@@ -133,7 +133,13 @@ class MeterRepository(
     }
 
     suspend fun restoreSession() {
-        if (session.token != null) replaceFromCloud()
+        if (session.token == null) return
+        try {
+            replaceFromCloud()
+        } catch (error: AuthExpiredException) {
+            session.clear()
+            throw error
+        }
     }
 
     suspend fun syncNow() {
@@ -156,12 +162,22 @@ class MeterRepository(
 
     private suspend fun uploadToCloud() {
         val token = session.token ?: return
-        api.uploadSnapshot(token, dao.getMetersSnapshot())
+        try {
+            api.uploadSnapshot(token, dao.getMetersSnapshot())
+        } catch (error: AuthExpiredException) {
+            session.clear()
+            throw error
+        }
     }
 
     private suspend fun replaceFromCloud() {
         val token = session.token ?: return
-        val snapshot = api.downloadSnapshot(token)
+        val snapshot = try {
+            api.downloadSnapshot(token)
+        } catch (error: AuthExpiredException) {
+            session.clear()
+            throw error
+        }
         database.withTransaction {
             dao.deleteAllReadings()
             dao.deleteAllMeters()

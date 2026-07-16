@@ -134,7 +134,17 @@ class MeterApi(baseUrl: String) {
             val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
             val json = if (text.isBlank()) JSONObject() else JSONObject(text)
             if (connection.responseCode !in 200..299) {
-                throw ApiException(json.optString("error", "Request failed (${connection.responseCode})."))
+                val message = json.optString(
+                    "error",
+                    "Request failed (${connection.responseCode}).",
+                )
+                if (
+                    connection.responseCode == HttpURLConnection.HTTP_UNAUTHORIZED &&
+                    message.contains("token", ignoreCase = true)
+                ) {
+                    throw AuthExpiredException(message)
+                }
+                throw ApiException(message)
             }
             return json
         } finally {
@@ -143,7 +153,9 @@ class MeterApi(baseUrl: String) {
     }
 }
 
-class ApiException(message: String) : Exception(message)
+open class ApiException(message: String) : Exception(message)
+
+class AuthExpiredException(message: String) : ApiException(message)
 
 private fun JSONObject.putNullable(key: String, value: Any?): JSONObject =
     put(key, value ?: JSONObject.NULL)
