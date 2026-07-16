@@ -53,6 +53,8 @@ import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -99,6 +101,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -268,6 +271,7 @@ private fun AuthScreen(
 ) {
     var username by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
+    var passwordVisible by rememberSaveable { mutableStateOf(false) }
     var registering by rememberSaveable { mutableStateOf(false) }
 
     Box(
@@ -319,7 +323,17 @@ private fun AuthScreen(
                     singleLine = true,
                     enabled = !loading,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    visualTransformation = PasswordVisualTransformation(),
+                    visualTransformation = if (passwordVisible) {
+                        VisualTransformation.None
+                    } else {
+                        PasswordVisualTransformation()
+                    },
+                    trailingIcon = {
+                        PasswordVisibilityButton(
+                            visible = passwordVisible,
+                            onToggle = { passwordVisible = !passwordVisible },
+                        )
+                    },
                     supportingText = if (registering) {
                         { Text("Use at least 8 characters.") }
                     } else {
@@ -657,6 +671,9 @@ private fun ChangePasswordDialog(
     var currentPassword by rememberSaveable { mutableStateOf("") }
     var newPassword by rememberSaveable { mutableStateOf("") }
     var confirmPassword by rememberSaveable { mutableStateOf("") }
+    var currentPasswordVisible by rememberSaveable { mutableStateOf(false) }
+    var newPasswordVisible by rememberSaveable { mutableStateOf(false) }
+    var confirmPasswordVisible by rememberSaveable { mutableStateOf(false) }
     var attempted by rememberSaveable { mutableStateOf(false) }
     val passwordsMatch = newPassword == confirmPassword
     val valid = currentPassword.length >= 8 &&
@@ -678,7 +695,17 @@ private fun ChangePasswordDialog(
                     enabled = !loading,
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    visualTransformation = PasswordVisualTransformation(),
+                    visualTransformation = if (currentPasswordVisible) {
+                        VisualTransformation.None
+                    } else {
+                        PasswordVisualTransformation()
+                    },
+                    trailingIcon = {
+                        PasswordVisibilityButton(
+                            visible = currentPasswordVisible,
+                            onToggle = { currentPasswordVisible = !currentPasswordVisible },
+                        )
+                    },
                 )
                 OutlinedTextField(
                     value = newPassword,
@@ -689,7 +716,17 @@ private fun ChangePasswordDialog(
                     singleLine = true,
                     isError = attempted && newPassword.length < 8,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    visualTransformation = PasswordVisualTransformation(),
+                    visualTransformation = if (newPasswordVisible) {
+                        VisualTransformation.None
+                    } else {
+                        PasswordVisualTransformation()
+                    },
+                    trailingIcon = {
+                        PasswordVisibilityButton(
+                            visible = newPasswordVisible,
+                            onToggle = { newPasswordVisible = !newPasswordVisible },
+                        )
+                    },
                     supportingText = { Text("Use at least 8 characters.") },
                 )
                 OutlinedTextField(
@@ -701,7 +738,17 @@ private fun ChangePasswordDialog(
                     singleLine = true,
                     isError = attempted && !passwordsMatch,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    visualTransformation = PasswordVisualTransformation(),
+                    visualTransformation = if (confirmPasswordVisible) {
+                        VisualTransformation.None
+                    } else {
+                        PasswordVisualTransformation()
+                    },
+                    trailingIcon = {
+                        PasswordVisibilityButton(
+                            visible = confirmPasswordVisible,
+                            onToggle = { confirmPasswordVisible = !confirmPasswordVisible },
+                        )
+                    },
                     supportingText = {
                         if (attempted && !passwordsMatch) Text("Passwords do not match.")
                     },
@@ -735,6 +782,19 @@ private fun ChangePasswordDialog(
             }
         },
     )
+}
+
+@Composable
+private fun PasswordVisibilityButton(
+    visible: Boolean,
+    onToggle: () -> Unit,
+) {
+    IconButton(onClick = onToggle) {
+        Icon(
+            imageVector = if (visible) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+            contentDescription = if (visible) "Hide password" else "Show password",
+        )
+    }
 }
 
 @Composable
