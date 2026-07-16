@@ -49,6 +49,8 @@ class MeterViewModel(
     val importPreview: StateFlow<ImportPreview?> = _importPreview.asStateFlow()
     private val _syncStatus = MutableStateFlow(SyncStatus.SYNCED)
     val syncStatus: StateFlow<SyncStatus> = _syncStatus.asStateFlow()
+    private val _passwordChanging = MutableStateFlow(false)
+    val passwordChanging: StateFlow<Boolean> = _passwordChanging.asStateFlow()
 
     private val _messages = MutableSharedFlow<String>()
     val messages: SharedFlow<String> = _messages.asSharedFlow()
@@ -116,6 +118,31 @@ class MeterViewModel(
 
     fun clearAuthError() {
         _authState.value = _authState.value.copy(error = null)
+    }
+
+    fun changePassword(currentPassword: String, newPassword: String) = viewModelScope.launch {
+        _passwordChanging.value = true
+        _authState.value = _authState.value.copy(error = null)
+        runCatching { repository.changePassword(currentPassword, newPassword) }
+            .onSuccess { user ->
+                _authState.value = AuthUiState(user = user, initialized = true)
+                _messages.emit("Password updated.")
+            }
+            .onFailure { error ->
+                if (error is AuthExpiredException) {
+                    _authState.value = AuthUiState(
+                        initialized = true,
+                        error = "Session expired. Please sign in again.",
+                    )
+                    _messages.emit("Session expired. Please sign in again.")
+                } else {
+                    _authState.value = _authState.value.copy(
+                        error = error.message ?: "Password update failed.",
+                    )
+                    _messages.emit(error.message ?: "Password update failed.")
+                }
+            }
+        _passwordChanging.value = false
     }
 
     fun addMeter(

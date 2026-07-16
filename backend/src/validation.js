@@ -5,6 +5,11 @@ export const credentialsSchema = z.object({
   password: z.string().min(8).max(128),
 });
 
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(8).max(128),
+  newPassword: z.string().min(8).max(128),
+});
+
 export const meterSchema = z
   .object({
     clientId: z.union([z.string(), z.number()]).transform(String),

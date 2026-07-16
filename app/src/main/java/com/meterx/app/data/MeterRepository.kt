@@ -148,6 +148,18 @@ class MeterRepository(
         uploadToCloud()
     }
 
+    suspend fun changePassword(currentPassword: String, newPassword: String): AuthUser {
+        val token = session.token ?: throw AuthExpiredException("Session expired.")
+        try {
+            val result = api.changePassword(token, currentPassword, newPassword)
+            session.save(result.token, result.user)
+            return result.user
+        } catch (error: AuthExpiredException) {
+            session.clear()
+            throw error
+        }
+    }
+
     suspend fun logout() {
         session.clear()
         database.withTransaction {

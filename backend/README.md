@@ -76,6 +76,21 @@ Authorization: Bearer JWT_TOKEN
 This returns a newly signed JWT for the same user. Expired or invalid tokens
 must sign in again.
 
+Change password while signed in:
+
+```http
+POST /api/auth/change-password
+Authorization: Bearer JWT_TOKEN
+Content-Type: application/json
+
+{
+  "currentPassword": "old-password",
+  "newPassword": "new-strong-password"
+}
+```
+
+This verifies the current password and returns a fresh JWT.
+
 ## Sync API
 
 - `GET /api/sync` downloads the user's complete cloud snapshot.

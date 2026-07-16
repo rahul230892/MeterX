@@ -126,6 +126,7 @@ fun MeterXApp(viewModel: MeterViewModel) {
     val importPreview by viewModel.importPreview.collectAsStateWithLifecycle()
     val reminderSettings by viewModel.reminderSettings.collectAsStateWithLifecycle()
     val syncStatus by viewModel.syncStatus.collectAsStateWithLifecycle()
+    val passwordChanging by viewModel.passwordChanging.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     var selectedMeterId by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -183,6 +184,8 @@ fun MeterXApp(viewModel: MeterViewModel) {
             onImport = {
                 importLauncher.launch(arrayOf("application/json", "text/json", "text/plain"))
             },
+            changingPassword = passwordChanging,
+            onChangePassword = viewModel::changePassword,
             onLogout = {
                 showSettings = false
                 viewModel.logout()
@@ -523,11 +526,14 @@ private fun SettingsScreen(
     onBack: () -> Unit,
     onExport: () -> Unit,
     onImport: () -> Unit,
+    changingPassword: Boolean,
+    onChangePassword: (String, String) -> Unit,
     onLogout: () -> Unit,
     onReminderEnabledChange: (Boolean) -> Unit,
     onReminderTimeChange: (Int, Int) -> Unit,
 ) {
     var showTimePicker by rememberSaveable { mutableStateOf(false) }
+    var showChangePassword by rememberSaveable { mutableStateOf(false) }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -595,6 +601,13 @@ private fun SettingsScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         OutlinedButton(
+                            onClick = { showChangePassword = true },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !changingPassword,
+                        ) {
+                            Text("Change password")
+                        }
+                        OutlinedButton(
                             onClick = onLogout,
                             modifier = Modifier.fillMaxWidth(),
                         ) {
@@ -622,6 +635,106 @@ private fun SettingsScreen(
             },
         )
     }
+
+    if (showChangePassword) {
+        ChangePasswordDialog(
+            loading = changingPassword,
+            onDismiss = { showChangePassword = false },
+            onSave = { currentPassword, newPassword ->
+                onChangePassword(currentPassword, newPassword)
+                showChangePassword = false
+            },
+        )
+    }
+}
+
+@Composable
+private fun ChangePasswordDialog(
+    loading: Boolean,
+    onDismiss: () -> Unit,
+    onSave: (String, String) -> Unit,
+) {
+    var currentPassword by rememberSaveable { mutableStateOf("") }
+    var newPassword by rememberSaveable { mutableStateOf("") }
+    var confirmPassword by rememberSaveable { mutableStateOf("") }
+    var attempted by rememberSaveable { mutableStateOf(false) }
+    val passwordsMatch = newPassword == confirmPassword
+    val valid = currentPassword.length >= 8 &&
+        newPassword.length >= 8 &&
+        passwordsMatch
+
+    AlertDialog(
+        onDismissRequest = {
+            if (!loading) onDismiss()
+        },
+        title = { Text("Change password") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = currentPassword,
+                    onValueChange = { currentPassword = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Current password") },
+                    enabled = !loading,
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    visualTransformation = PasswordVisualTransformation(),
+                )
+                OutlinedTextField(
+                    value = newPassword,
+                    onValueChange = { newPassword = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("New password") },
+                    enabled = !loading,
+                    singleLine = true,
+                    isError = attempted && newPassword.length < 8,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    visualTransformation = PasswordVisualTransformation(),
+                    supportingText = { Text("Use at least 8 characters.") },
+                )
+                OutlinedTextField(
+                    value = confirmPassword,
+                    onValueChange = { confirmPassword = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Confirm new password") },
+                    enabled = !loading,
+                    singleLine = true,
+                    isError = attempted && !passwordsMatch,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    visualTransformation = PasswordVisualTransformation(),
+                    supportingText = {
+                        if (attempted && !passwordsMatch) Text("Passwords do not match.")
+                    },
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    attempted = true
+                    if (valid) onSave(currentPassword, newPassword)
+                },
+                enabled = !loading,
+            ) {
+                if (loading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    Text("Update password")
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                enabled = !loading,
+            ) {
+                Text("Cancel")
+            }
+        },
+    )
 }
 
 @Composable

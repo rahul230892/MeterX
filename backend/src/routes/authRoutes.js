@@ -2,7 +2,7 @@ import bcrypt from "bcryptjs";
 import { Router } from "express";
 import { authenticate, createToken, toUserResponse } from "../auth.js";
 import { User } from "../models/User.js";
-import { credentialsSchema } from "../validation.js";
+import { changePasswordSchema, credentialsSchema } from "../validation.js";
 
 export function createAuthRouter(config) {
   const router = Router();
@@ -50,6 +50,26 @@ export function createAuthRouter(config) {
       token: createToken(request.user, config),
       user: toUserResponse(request.user),
     });
+  });
+
+  router.post("/change-password", authenticate(config), async (request, response, next) => {
+    try {
+      const input = changePasswordSchema.parse(request.body);
+      const user = await User.findById(request.user.id).select("+passwordHash");
+      if (!user || !(await bcrypt.compare(input.currentPassword, user.passwordHash))) {
+        return response.status(401).json({ error: "Current password is incorrect." });
+      }
+
+      user.passwordHash = await bcrypt.hash(input.newPassword, 12);
+      await user.save();
+
+      return response.json({
+        token: createToken(user, config),
+        user: toUserResponse(user),
+      });
+    } catch (error) {
+      return next(error);
+    }
   });
 
   return router;

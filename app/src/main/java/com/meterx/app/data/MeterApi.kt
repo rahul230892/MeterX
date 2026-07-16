@@ -51,6 +51,22 @@ class MeterApi(baseUrl: String) {
         response.toAuthResult()
     }
 
+    suspend fun changePassword(
+        token: String,
+        currentPassword: String,
+        newPassword: String,
+    ): AuthResult = withContext(Dispatchers.IO) {
+        val response = request(
+            method = "POST",
+            path = "/api/auth/change-password",
+            token = token,
+            body = JSONObject()
+                .put("currentPassword", currentPassword)
+                .put("newPassword", newPassword),
+        )
+        response.toAuthResult()
+    }
+
     suspend fun downloadSnapshot(token: String): CloudSnapshot = withContext(Dispatchers.IO) {
         val response = request("GET", "/api/sync", token)
         val meters = response.getJSONArray("meters").toCloudMeters()
