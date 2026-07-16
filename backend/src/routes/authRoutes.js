@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs";
 import { Router } from "express";
-import { createToken } from "../auth.js";
+import { authenticate, createToken, toUserResponse } from "../auth.js";
 import { User } from "../models/User.js";
 import { credentialsSchema } from "../validation.js";
 
@@ -21,7 +21,7 @@ export function createAuthRouter(config) {
       });
       return response.status(201).json({
         token: createToken(user, config),
-        user: { id: user.id, username: user.username },
+        user: toUserResponse(user),
       });
     } catch (error) {
       return next(error);
@@ -38,11 +38,18 @@ export function createAuthRouter(config) {
       }
       return response.json({
         token: createToken(user, config),
-        user: { id: user.id, username: user.username },
+        user: toUserResponse(user),
       });
     } catch (error) {
       return next(error);
     }
+  });
+
+  router.post("/refresh", authenticate(config), async (request, response) => {
+    response.json({
+      token: createToken(request.user, config),
+      user: toUserResponse(request.user),
+    });
   });
 
   return router;

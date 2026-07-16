@@ -1,12 +1,17 @@
+import { randomUUID } from "node:crypto";
 import jwt from "jsonwebtoken";
 import { User } from "./models/User.js";
 
 export function createToken(user, config) {
   return jwt.sign(
-    { sub: user.id, username: user.username },
+    { sub: user.id, username: user.username, jti: randomUUID() },
     config.JWT_SECRET,
     { expiresIn: config.JWT_EXPIRES_IN },
   );
+}
+
+export function toUserResponse(user) {
+  return { id: user.id, username: user.username };
 }
 
 export function authenticate(config) {

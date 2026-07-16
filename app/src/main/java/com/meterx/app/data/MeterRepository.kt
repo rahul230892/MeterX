@@ -133,8 +133,10 @@ class MeterRepository(
     }
 
     suspend fun restoreSession() {
-        if (session.token == null) return
+        val token = session.token ?: return
         try {
+            val refreshed = api.refresh(token)
+            session.save(refreshed.token, refreshed.user)
             replaceFromCloud()
         } catch (error: AuthExpiredException) {
             session.clear()

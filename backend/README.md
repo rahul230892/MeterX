@@ -66,6 +66,16 @@ Both return a JWT. Send it on protected requests:
 Authorization: Bearer JWT_TOKEN
 ```
 
+Refresh a valid saved session token:
+
+```http
+POST /api/auth/refresh
+Authorization: Bearer JWT_TOKEN
+```
+
+This returns a newly signed JWT for the same user. Expired or invalid tokens
+must sign in again.
+
 ## Sync API
 
 - `GET /api/sync` downloads the user's complete cloud snapshot.

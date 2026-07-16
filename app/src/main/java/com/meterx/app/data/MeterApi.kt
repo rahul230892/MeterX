@@ -46,6 +46,11 @@ class MeterApi(baseUrl: String) {
     suspend fun login(username: String, password: String): AuthResult =
         authenticate("/api/auth/login", username, password)
 
+    suspend fun refresh(token: String): AuthResult = withContext(Dispatchers.IO) {
+        val response = request("POST", "/api/auth/refresh", token)
+        response.toAuthResult()
+    }
+
     suspend fun downloadSnapshot(token: String): CloudSnapshot = withContext(Dispatchers.IO) {
         val response = request("GET", "/api/sync", token)
         val meters = response.getJSONArray("meters").toCloudMeters()
@@ -101,10 +106,7 @@ class MeterApi(baseUrl: String) {
             body = JSONObject().put("username", username).put("password", password),
         )
         val user = response.getJSONObject("user")
-        AuthResult(
-            token = response.getString("token"),
-            user = AuthUser(user.getString("id"), user.getString("username")),
-        )
+        response.toAuthResult()
     }
 
     private fun request(
@@ -151,6 +153,14 @@ class MeterApi(baseUrl: String) {
             connection.disconnect()
         }
     }
+}
+
+private fun JSONObject.toAuthResult(): AuthResult {
+    val user = getJSONObject("user")
+    return AuthResult(
+        token = getString("token"),
+        user = AuthUser(user.getString("id"), user.getString("username")),
+    )
 }
 
 open class ApiException(message: String) : Exception(message)
