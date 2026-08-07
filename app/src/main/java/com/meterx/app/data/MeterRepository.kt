@@ -13,6 +13,7 @@ class MeterRepository(
     private val dao = database.meterDao()
 
     val meters: Flow<List<MeterWithReadings>> = dao.observeMeters()
+    val paymentMethods: Flow<List<PaymentMethodEntity>> = dao.observePaymentMethods()
 
     suspend fun addMeter(
         nickname: String,
@@ -44,9 +45,10 @@ class MeterRepository(
         value: Double,
         date: Long,
         isBilled: Boolean,
+        payment: PaymentInput?,
     ) {
         database.withTransaction {
-            dao.insertReading(
+            val readingId = dao.insertReading(
                 ReadingEntity(
                     meterId = meter.id,
                     value = value,
@@ -54,6 +56,9 @@ class MeterRepository(
                     isBilled = isBilled,
                 ),
             )
+            if (isBilled && payment != null) {
+                dao.insertPaymentRecord(payment.toRecord(meter.id, readingId))
+            }
             if (
                 meter.type == MeterType.ELECTRICITY &&
                 (meter.cycleBaseline == null || isBilled)
@@ -75,6 +80,7 @@ class MeterRepository(
         value: Double,
         date: Long,
         isBilled: Boolean,
+        payment: PaymentInput?,
     ) {
         database.withTransaction {
             dao.updateReading(
@@ -84,6 +90,18 @@ class MeterRepository(
                     isBilled = isBilled,
                 ),
             )
+            if (isBilled && payment != null) {
+                val existingPayment = dao.getPaymentForReading(reading.id)
+                dao.insertPaymentRecord(
+                    payment.toRecord(
+                        meterId = meter.id,
+                        readingId = reading.id,
+                        existing = existingPayment,
+                    ),
+                )
+            } else {
+                dao.deletePaymentForReading(reading.id)
+            }
             if (
                 meter.type == MeterType.ELECTRICITY &&
                 (isBilled || meter.cycleBaseline == reading.value)
@@ -91,6 +109,18 @@ class MeterRepository(
                 dao.updateMeter(meter.copy(cycleBaseline = value))
             }
         }
+        syncBackup()
+    }
+
+    suspend fun addPaymentMethod(name: String) {
+        val trimmed = name.trim()
+        require(trimmed.isNotEmpty()) { "Payment option name is required." }
+        dao.insertPaymentMethod(PaymentMethodEntity(name = trimmed))
+        syncBackup()
+    }
+
+    suspend fun deletePaymentMethod(method: PaymentMethodEntity) {
+        dao.deletePaymentMethod(method)
         syncBackup()
     }
 
@@ -102,7 +132,7 @@ class MeterRepository(
     }
 
     suspend fun exportData(uri: Uri) {
-        backup.export(uri, dao.getMetersSnapshot())
+        backup.export(uri, dao.getMetersSnapshot(), dao.getPaymentMethodsSnapshot())
     }
 
     suspend fun previewImport(uri: Uri): ImportPreview = backup.previewImport(uri)
@@ -110,10 +140,14 @@ class MeterRepository(
     suspend fun importData(preview: ImportPreview) {
         val imported = backup.readImport(preview.uri)
         database.withTransaction {
+            dao.deleteAllPaymentRecords()
+            dao.deleteAllPaymentMethods()
             dao.deleteAllReadings()
             dao.deleteAllMeters()
             dao.insertMeters(imported.meters)
             dao.insertReadings(imported.readings)
+            dao.insertPaymentMethods(imported.paymentMethods)
+            dao.insertPaymentRecords(imported.payments)
         }
         syncBackup()
     }
@@ -163,21 +197,27 @@ class MeterRepository(
     suspend fun logout() {
         session.clear()
         database.withTransaction {
+            dao.deleteAllPaymentRecords()
+            dao.deleteAllPaymentMethods()
             dao.deleteAllReadings()
             dao.deleteAllMeters()
         }
-        backup.write(emptyList())
+        backup.write(emptyList(), emptyList())
     }
 
     private suspend fun syncBackup() {
-        backup.write(dao.getMetersSnapshot())
+        backup.write(dao.getMetersSnapshot(), dao.getPaymentMethodsSnapshot())
         if (session.token != null) uploadToCloud()
     }
 
     private suspend fun uploadToCloud() {
         val token = session.token ?: return
         try {
-            api.uploadSnapshot(token, dao.getMetersSnapshot())
+            api.uploadSnapshot(
+                token = token,
+                snapshot = dao.getMetersSnapshot(),
+                paymentMethods = dao.getPaymentMethodsSnapshot(),
+            )
         } catch (error: AuthExpiredException) {
             session.clear()
             throw error
@@ -193,8 +233,18 @@ class MeterRepository(
             throw error
         }
         database.withTransaction {
+            dao.deleteAllPaymentRecords()
+            dao.deleteAllPaymentMethods()
             dao.deleteAllReadings()
             dao.deleteAllMeters()
+            dao.insertPaymentMethods(
+                snapshot.paymentMethods.map { method ->
+                    PaymentMethodEntity(
+                        name = method.name,
+                        createdAt = method.createdAt,
+                    )
+                },
+            )
             val localIdsByClientId = snapshot.meters.map { meter ->
                 val localId = dao.insertMeter(
                     MeterEntity(
@@ -209,20 +259,51 @@ class MeterRepository(
                 )
                 meter.clientId to localId
             }.toMap()
-            dao.insertReadings(
-                snapshot.readings.mapNotNull { reading ->
-                    localIdsByClientId[reading.meterClientId]?.let { localMeterId ->
-                        ReadingEntity(
-                            meterId = localMeterId,
-                            value = reading.value,
-                            readingDate = reading.readingDate,
-                            isBilled = reading.isBilled,
-                            createdAt = reading.createdAt,
-                        )
-                    }
+            val localReadingIdsByClientId = snapshot.readings.mapNotNull { reading ->
+                val localMeterId = localIdsByClientId[reading.meterClientId] ?: return@mapNotNull null
+                val localReadingId = dao.insertReading(
+                    ReadingEntity(
+                        meterId = localMeterId,
+                        value = reading.value,
+                        readingDate = reading.readingDate,
+                        isBilled = reading.isBilled,
+                        createdAt = reading.createdAt,
+                    ),
+                )
+                reading.clientId to localReadingId
+            }.toMap()
+            dao.insertPaymentRecords(
+                snapshot.payments.mapNotNull { payment ->
+                    val localMeterId = localIdsByClientId[payment.meterClientId]
+                        ?: return@mapNotNull null
+                    val localReadingId = localReadingIdsByClientId[payment.readingClientId]
+                        ?: return@mapNotNull null
+                    PaymentRecordEntity(
+                        meterId = localMeterId,
+                        readingId = localReadingId,
+                        amount = payment.amount,
+                        paymentDate = payment.paymentDate,
+                        methodName = payment.methodName,
+                        createdAt = payment.createdAt,
+                    )
                 },
             )
         }
-        backup.write(dao.getMetersSnapshot())
+        backup.write(dao.getMetersSnapshot(), dao.getPaymentMethodsSnapshot())
     }
+
+    private fun PaymentInput.toRecord(
+        meterId: Long,
+        readingId: Long,
+        existing: PaymentRecordEntity? = null,
+    ): PaymentRecordEntity =
+        PaymentRecordEntity(
+            id = existing?.id ?: 0,
+            meterId = meterId,
+            readingId = readingId,
+            amount = amount,
+            paymentDate = paymentDate,
+            methodName = methodName.trim(),
+            createdAt = existing?.createdAt ?: System.currentTimeMillis(),
+        )
 }

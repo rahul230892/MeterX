@@ -15,6 +15,8 @@ data class AuthResult(
 data class CloudSnapshot(
     val meters: List<CloudMeter>,
     val readings: List<CloudReading>,
+    val paymentMethods: List<CloudPaymentMethod>,
+    val payments: List<CloudPayment>,
 )
 
 data class CloudMeter(
@@ -34,6 +36,22 @@ data class CloudReading(
     val value: Double,
     val readingDate: Long,
     val isBilled: Boolean,
+    val createdAt: Long,
+)
+
+data class CloudPaymentMethod(
+    val clientId: String,
+    val name: String,
+    val createdAt: Long,
+)
+
+data class CloudPayment(
+    val clientId: String,
+    val meterClientId: String,
+    val readingClientId: String,
+    val amount: Double,
+    val paymentDate: Long,
+    val methodName: String,
     val createdAt: Long,
 )
 
@@ -71,13 +89,31 @@ class MeterApi(baseUrl: String) {
         val response = request("GET", "/api/sync", token)
         val meters = response.getJSONArray("meters").toCloudMeters()
         val readings = response.getJSONArray("readings").toCloudReadings()
-        CloudSnapshot(meters, readings)
+        val paymentMethods = response.optJSONArray("paymentMethods")
+            ?.toCloudPaymentMethods()
+            .orEmpty()
+        val payments = response.optJSONArray("payments")?.toCloudPayments().orEmpty()
+        CloudSnapshot(meters, readings, paymentMethods, payments)
     }
 
-    suspend fun uploadSnapshot(token: String, snapshot: List<MeterWithReadings>) {
+    suspend fun uploadSnapshot(
+        token: String,
+        snapshot: List<MeterWithReadings>,
+        paymentMethods: List<PaymentMethodEntity>,
+    ) {
         withContext(Dispatchers.IO) {
             val meters = JSONArray()
             val readings = JSONArray()
+            val methods = JSONArray()
+            val payments = JSONArray()
+            paymentMethods.forEach { method ->
+                methods.put(
+                    JSONObject()
+                        .put("clientId", method.id.toString())
+                        .put("name", method.name)
+                        .put("createdAt", method.createdAt),
+                )
+            }
             snapshot.forEach { item ->
                 meters.put(
                     JSONObject()
@@ -101,12 +137,28 @@ class MeterApi(baseUrl: String) {
                             .put("createdAt", reading.createdAt),
                     )
                 }
+                item.payments.forEach { payment ->
+                    payments.put(
+                        JSONObject()
+                            .put("clientId", payment.id.toString())
+                            .put("meterClientId", item.meter.id.toString())
+                            .put("readingClientId", payment.readingId.toString())
+                            .put("amount", payment.amount)
+                            .put("paymentDate", payment.paymentDate)
+                            .put("methodName", payment.methodName)
+                            .put("createdAt", payment.createdAt),
+                    )
+                }
             }
             request(
                 method = "PUT",
                 path = "/api/sync",
                 token = token,
-                body = JSONObject().put("meters", meters).put("readings", readings),
+                body = JSONObject()
+                    .put("meters", meters)
+                    .put("readings", readings)
+                    .put("paymentMethods", methods)
+                    .put("payments", payments),
             )
         }
     }
@@ -214,6 +266,36 @@ private fun JSONArray.toCloudReadings(): List<CloudReading> = buildList {
                 value = item.getDouble("value"),
                 readingDate = item.getLong("readingDate"),
                 isBilled = item.getBoolean("isBilled"),
+                createdAt = item.getLong("createdAt"),
+            ),
+        )
+    }
+}
+
+private fun JSONArray.toCloudPaymentMethods(): List<CloudPaymentMethod> = buildList {
+    for (index in 0 until length()) {
+        val item = getJSONObject(index)
+        add(
+            CloudPaymentMethod(
+                clientId = item.getString("clientId"),
+                name = item.getString("name"),
+                createdAt = item.getLong("createdAt"),
+            ),
+        )
+    }
+}
+
+private fun JSONArray.toCloudPayments(): List<CloudPayment> = buildList {
+    for (index in 0 until length()) {
+        val item = getJSONObject(index)
+        add(
+            CloudPayment(
+                clientId = item.getString("clientId"),
+                meterClientId = item.getString("meterClientId"),
+                readingClientId = item.getString("readingClientId"),
+                amount = item.getDouble("amount"),
+                paymentDate = item.getLong("paymentDate"),
+                methodName = item.getString("methodName"),
                 createdAt = item.getLong("createdAt"),
             ),
         )

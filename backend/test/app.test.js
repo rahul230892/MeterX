@@ -47,7 +47,25 @@ test("snapshot validation accepts MeterX Android data", () => {
         meterClientId: 1,
         value: 1025,
         readingDate: 20500,
-        isBilled: false,
+        isBilled: true,
+        createdAt: 1710000000000,
+      },
+    ],
+    paymentMethods: [
+      {
+        clientId: 20,
+        name: "Amazon Pay",
+        createdAt: 1710000000000,
+      },
+    ],
+    payments: [
+      {
+        clientId: 30,
+        meterClientId: 1,
+        readingClientId: 10,
+        amount: 1250,
+        paymentDate: 20502,
+        methodName: "Amazon Pay",
         createdAt: 1710000000000,
       },
     ],
@@ -55,6 +73,8 @@ test("snapshot validation accepts MeterX Android data", () => {
 
   assert.equal(snapshot.meters[0].clientId, "1");
   assert.equal(snapshot.readings[0].meterClientId, "1");
+  assert.equal(snapshot.paymentMethods[0].clientId, "20");
+  assert.equal(snapshot.payments[0].readingClientId, "10");
 });
 
 test("snapshot validation rejects orphan readings", () => {
@@ -67,6 +87,46 @@ test("snapshot validation rejects orphan readings", () => {
         value: 10,
         readingDate: 20500,
         isBilled: false,
+        createdAt: 1710000000000,
+      },
+    ],
+  });
+
+  assert.equal(result.success, false);
+});
+
+test("snapshot validation rejects payments for unbilled readings", () => {
+  const result = snapshotSchema.safeParse({
+    meters: [
+      {
+        clientId: "1",
+        nickname: "Home",
+        type: "ELECTRICITY",
+        meterNumber: "M-1",
+        consumerNumber: null,
+        freeUnits: 200,
+        cycleBaseline: 1000,
+        createdAt: 1710000000000,
+      },
+    ],
+    readings: [
+      {
+        clientId: "10",
+        meterClientId: "1",
+        value: 1025,
+        readingDate: 20500,
+        isBilled: false,
+        createdAt: 1710000000000,
+      },
+    ],
+    payments: [
+      {
+        clientId: "30",
+        meterClientId: "1",
+        readingClientId: "10",
+        amount: 1250,
+        paymentDate: 20502,
+        methodName: "Amazon Pay",
         createdAt: 1710000000000,
       },
     ],

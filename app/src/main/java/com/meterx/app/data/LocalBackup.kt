@@ -11,34 +11,50 @@ data class ImportPreview(
     val uri: Uri,
     val meterCount: Int,
     val readingCount: Int,
+    val paymentMethodCount: Int,
+    val paymentCount: Int,
 )
 
 data class ImportedData(
     val meters: List<MeterEntity>,
     val readings: List<ReadingEntity>,
+    val paymentMethods: List<PaymentMethodEntity>,
+    val payments: List<PaymentRecordEntity>,
 )
 
 class LocalBackup(private val context: Context) {
-    suspend fun write(meters: List<MeterWithReadings>) = withContext(Dispatchers.IO) {
+    suspend fun write(
+        meters: List<MeterWithReadings>,
+        paymentMethods: List<PaymentMethodEntity>,
+    ) = withContext(Dispatchers.IO) {
         val target = context.filesDir.resolve("meterx_backup.json")
         val temporary = context.filesDir.resolve("meterx_backup.tmp")
-        temporary.writeText(encode(meters))
+        temporary.writeText(encode(meters, paymentMethods))
         if (!temporary.renameTo(target)) {
             target.writeText(temporary.readText())
             temporary.delete()
         }
     }
 
-    suspend fun export(uri: Uri, meters: List<MeterWithReadings>) =
-        withContext(Dispatchers.IO) {
-            context.contentResolver.openOutputStream(uri, "w")?.bufferedWriter()?.use {
-                it.write(encode(meters))
-            } ?: error("Unable to open the selected file.")
-        }
+    suspend fun export(
+        uri: Uri,
+        meters: List<MeterWithReadings>,
+        paymentMethods: List<PaymentMethodEntity>,
+    ) = withContext(Dispatchers.IO) {
+        context.contentResolver.openOutputStream(uri, "w")?.bufferedWriter()?.use {
+            it.write(encode(meters, paymentMethods))
+        } ?: error("Unable to open the selected file.")
+    }
 
     suspend fun previewImport(uri: Uri): ImportPreview = withContext(Dispatchers.IO) {
         val data = decode(readText(uri))
-        ImportPreview(uri, data.meters.size, data.readings.size)
+        ImportPreview(
+            uri = uri,
+            meterCount = data.meters.size,
+            readingCount = data.readings.size,
+            paymentMethodCount = data.paymentMethods.size,
+            paymentCount = data.payments.size,
+        )
     }
 
     suspend fun readImport(uri: Uri): ImportedData = withContext(Dispatchers.IO) {
@@ -49,7 +65,20 @@ class LocalBackup(private val context: Context) {
         context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
             ?: error("Unable to open the selected file.")
 
-    private fun encode(meters: List<MeterWithReadings>): String {
+    private fun encode(
+        meters: List<MeterWithReadings>,
+        paymentMethods: List<PaymentMethodEntity>,
+    ): String {
+        val methodArray = JSONArray()
+        paymentMethods.forEach { method ->
+            methodArray.put(
+                JSONObject()
+                    .put("id", method.id)
+                    .put("name", method.name)
+                    .put("createdAt", method.createdAt),
+            )
+        }
+
         val meterArray = JSONArray()
         meters.forEach { item ->
             val readings = JSONArray()
@@ -63,6 +92,20 @@ class LocalBackup(private val context: Context) {
                         .put("createdAt", reading.createdAt),
                 )
             }
+
+            val payments = JSONArray()
+            item.payments.forEach { payment ->
+                payments.put(
+                    JSONObject()
+                        .put("id", payment.id)
+                        .put("readingId", payment.readingId)
+                        .put("amount", payment.amount)
+                        .put("paymentDate", payment.paymentDate)
+                        .put("methodName", payment.methodName)
+                        .put("createdAt", payment.createdAt),
+                )
+            }
+
             meterArray.put(
                 JSONObject()
                     .put("id", item.meter.id)
@@ -73,14 +116,16 @@ class LocalBackup(private val context: Context) {
                     .put("freeUnits", item.meter.freeUnits ?: JSONObject.NULL)
                     .put("cycleBaseline", item.meter.cycleBaseline ?: JSONObject.NULL)
                     .put("createdAt", item.meter.createdAt)
-                    .put("readings", readings),
+                    .put("readings", readings)
+                    .put("payments", payments),
             )
         }
 
         return JSONObject()
             .put("format", "meterx-backup")
-            .put("version", 1)
+            .put("version", 2)
             .put("exportedAt", System.currentTimeMillis())
+            .put("paymentMethods", methodArray)
             .put("meters", meterArray)
             .toString(2)
     }
@@ -91,15 +136,36 @@ class LocalBackup(private val context: Context) {
         } catch (_: Exception) {
             error("This is not a valid MeterX data file.")
         }
-        require(root.optInt("version", -1) == 1) {
+        val version = root.optInt("version", -1)
+        require(version == 1 || version == 2) {
             "This MeterX data file version is not supported."
         }
         val meterArray = root.optJSONArray("meters")
             ?: error("The data file does not contain meters.")
         val meters = mutableListOf<MeterEntity>()
         val readings = mutableListOf<ReadingEntity>()
+        val paymentMethods = mutableListOf<PaymentMethodEntity>()
+        val payments = mutableListOf<PaymentRecordEntity>()
         val meterIds = mutableSetOf<Long>()
         val readingIds = mutableSetOf<Long>()
+        val paymentMethodIds = mutableSetOf<Long>()
+        val paymentIds = mutableSetOf<Long>()
+
+        val methodArray = root.optJSONArray("paymentMethods") ?: JSONArray()
+        repeat(methodArray.length()) { methodIndex ->
+            val json = methodArray.optJSONObject(methodIndex)
+                ?: error("A payment method record is invalid.")
+            val id = json.optLong("id", 0)
+            val name = json.optString("name").trim()
+            require(id > 0 && paymentMethodIds.add(id) && name.isNotEmpty()) {
+                "A payment method record is incomplete or duplicated."
+            }
+            paymentMethods += PaymentMethodEntity(
+                id = id,
+                name = name,
+                createdAt = json.optLong("createdAt", System.currentTimeMillis()),
+            )
+        }
 
         repeat(meterArray.length()) { meterIndex ->
             val json = meterArray.optJSONObject(meterIndex)
@@ -148,8 +214,37 @@ class LocalBackup(private val context: Context) {
                     createdAt = reading.optLong("createdAt", System.currentTimeMillis()),
                 )
             }
+
+            val paymentArray = json.optJSONArray("payments") ?: JSONArray()
+            repeat(paymentArray.length()) { paymentIndex ->
+                val payment = paymentArray.optJSONObject(paymentIndex)
+                    ?: error("A payment record is invalid.")
+                val paymentId = payment.optLong("id", 0)
+                val readingId = payment.optLong("readingId", 0)
+                val amount = payment.optDouble("amount", Double.NaN)
+                val methodName = payment.optString("methodName").trim()
+                require(
+                    paymentId > 0 &&
+                        paymentIds.add(paymentId) &&
+                        readingIds.contains(readingId) &&
+                        amount.isFinite() &&
+                        amount > 0 &&
+                        methodName.isNotEmpty(),
+                ) {
+                    "A payment record is incomplete or duplicated."
+                }
+                payments += PaymentRecordEntity(
+                    id = paymentId,
+                    meterId = id,
+                    readingId = readingId,
+                    amount = amount,
+                    paymentDate = payment.getLong("paymentDate"),
+                    methodName = methodName,
+                    createdAt = payment.optLong("createdAt", System.currentTimeMillis()),
+                )
+            }
         }
-        return ImportedData(meters, readings)
+        return ImportedData(meters, readings, paymentMethods, payments)
     }
 
     private fun JSONObject.nullableString(key: String): String? =

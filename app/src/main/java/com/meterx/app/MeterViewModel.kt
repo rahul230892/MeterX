@@ -7,12 +7,14 @@ import androidx.lifecycle.viewModelScope
 import com.meterx.app.data.AuthSession
 import com.meterx.app.data.AuthExpiredException
 import com.meterx.app.data.AuthUser
+import com.meterx.app.data.ImportPreview
 import com.meterx.app.data.MeterEntity
 import com.meterx.app.data.MeterRepository
 import com.meterx.app.data.MeterType
 import com.meterx.app.data.MeterWithReadings
+import com.meterx.app.data.PaymentInput
+import com.meterx.app.data.PaymentMethodEntity
 import com.meterx.app.data.ReadingEntity
-import com.meterx.app.data.ImportPreview
 import com.meterx.app.reminder.ReminderManager
 import com.meterx.app.reminder.ReminderSettings
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -61,6 +63,12 @@ class MeterViewModel(
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = emptyList(),
     )
+    val paymentMethods: StateFlow<List<PaymentMethodEntity>> =
+        repository.paymentMethods.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList(),
+        )
 
     init {
         viewModelScope.launch {
@@ -161,9 +169,15 @@ class MeterViewModel(
         syncOperation { repository.deleteMeter(meter) }
     }
 
-    fun addReading(meter: MeterEntity, value: Double, date: Long, isBilled: Boolean) =
+    fun addReading(
+        meter: MeterEntity,
+        value: Double,
+        date: Long,
+        isBilled: Boolean,
+        payment: PaymentInput?,
+    ) =
         viewModelScope.launch {
-            syncOperation { repository.addReading(meter, value, date, isBilled) }
+            syncOperation { repository.addReading(meter, value, date, isBilled, payment) }
         }
 
     fun deleteReading(reading: ReadingEntity) = viewModelScope.launch {
@@ -176,9 +190,22 @@ class MeterViewModel(
         value: Double,
         date: Long,
         isBilled: Boolean,
+        payment: PaymentInput?,
     ) = viewModelScope.launch {
         syncOperation {
-            repository.updateReading(meter, reading, value, date, isBilled)
+            repository.updateReading(meter, reading, value, date, isBilled, payment)
+        }
+    }
+
+    fun addPaymentMethod(name: String) = viewModelScope.launch {
+        syncOperation(failureMessage = "Payment option saved locally, but cloud sync failed.") {
+            repository.addPaymentMethod(name)
+        }
+    }
+
+    fun deletePaymentMethod(method: PaymentMethodEntity) = viewModelScope.launch {
+        syncOperation(failureMessage = "Payment option removed locally, but cloud sync failed.") {
+            repository.deletePaymentMethod(method)
         }
     }
 
@@ -210,7 +237,10 @@ class MeterViewModel(
             .onSuccess {
                 _syncStatus.value = SyncStatus.SYNCED
                 _importPreview.value = null
-                _messages.emit("Imported ${preview.meterCount} meters and ${preview.readingCount} readings.")
+                _messages.emit(
+                    "Imported ${preview.meterCount} meters, " +
+                        "${preview.readingCount} readings, and ${preview.paymentCount} payments.",
+                )
             }
             .onFailure {
                 _syncStatus.value = SyncStatus.ERROR

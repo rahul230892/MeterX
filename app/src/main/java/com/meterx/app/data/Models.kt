@@ -47,6 +47,47 @@ data class ReadingEntity(
     @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis(),
 )
 
+@Entity(
+    tableName = "payment_methods",
+    indices = [Index(value = ["name"], unique = true)],
+)
+data class PaymentMethodEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis(),
+)
+
+@Entity(
+    tableName = "payment_records",
+    foreignKeys = [
+        ForeignKey(
+            entity = MeterEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["meter_id"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+        ForeignKey(
+            entity = ReadingEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["reading_id"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [
+        Index("meter_id"),
+        Index(value = ["reading_id"], unique = true),
+    ],
+)
+data class PaymentRecordEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    @ColumnInfo(name = "meter_id") val meterId: Long,
+    @ColumnInfo(name = "reading_id") val readingId: Long,
+    val amount: Double,
+    @ColumnInfo(name = "payment_date") val paymentDate: Long,
+    @ColumnInfo(name = "method_name") val methodName: String,
+    @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis(),
+)
+
 data class MeterWithReadings(
     @Embedded val meter: MeterEntity,
     @Relation(
@@ -54,6 +95,11 @@ data class MeterWithReadings(
         entityColumn = "meter_id",
     )
     val readings: List<ReadingEntity>,
+    @Relation(
+        parentColumn = "id",
+        entityColumn = "meter_id",
+    )
+    val payments: List<PaymentRecordEntity>,
 ) {
     val sortedReadings: List<ReadingEntity>
         get() = readings.sortedWith(
@@ -63,7 +109,16 @@ data class MeterWithReadings(
 
     val latestReading: ReadingEntity?
         get() = sortedReadings.firstOrNull()
+
+    fun paymentFor(reading: ReadingEntity): PaymentRecordEntity? =
+        payments.firstOrNull { it.readingId == reading.id }
 }
+
+data class PaymentInput(
+    val amount: Double,
+    val paymentDate: Long,
+    val methodName: String,
+)
 
 data class UsageStatus(
     val used: Double,

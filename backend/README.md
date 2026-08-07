@@ -103,7 +103,8 @@ This verifies the current password and returns a fresh JWT.
 - `DELETE /api/readings/:clientId` deletes one reading.
 
 Android Room IDs are sent as `clientId` strings. This lets existing local data
-upload without changing the current Room schema.
+upload without changing generated local IDs. Payment methods and payment records
+are stored as separate cloud collections and included in the full sync snapshot.
 
 ### Snapshot example
 
@@ -127,7 +128,25 @@ upload without changing the current Room schema.
       "meterClientId": "1",
       "value": 1482,
       "readingDate": 20500,
-      "isBilled": false,
+      "isBilled": true,
+      "createdAt": 1710000000000
+    }
+  ],
+  "paymentMethods": [
+    {
+      "clientId": "1",
+      "name": "Amazon Pay",
+      "createdAt": 1710000000000
+    }
+  ],
+  "payments": [
+    {
+      "clientId": "1",
+      "meterClientId": "1",
+      "readingClientId": "1",
+      "amount": 1250,
+      "paymentDate": 20502,
+      "methodName": "Amazon Pay",
       "createdAt": 1710000000000
     }
   ]

@@ -36,6 +36,7 @@ class UsageStatusTest {
                 cycleBaseline = null,
             ),
             readings = emptyList(),
+            payments = emptyList(),
         )
 
         assertNull(item.usageStatus())
@@ -105,6 +106,7 @@ class UsageStatusTest {
             cycleBaseline = baseline,
         ),
         readings = readings,
+        payments = emptyList(),
     )
 
     private fun reading(id: Long, value: Double, date: Long) = ReadingEntity(

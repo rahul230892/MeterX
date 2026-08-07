@@ -45,6 +45,7 @@ import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.FileDownload
 import androidx.compose.material.icons.rounded.FileUpload
 import androidx.compose.material.icons.rounded.GasMeter
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Opacity
 import androidx.compose.material.icons.rounded.CloudSync
@@ -61,6 +62,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
@@ -110,6 +113,9 @@ import com.meterx.app.MeterViewModel
 import com.meterx.app.data.MeterEntity
 import com.meterx.app.data.MeterType
 import com.meterx.app.data.MeterWithReadings
+import com.meterx.app.data.PaymentInput
+import com.meterx.app.data.PaymentMethodEntity
+import com.meterx.app.data.PaymentRecordEntity
 import com.meterx.app.data.ReadingEntity
 import com.meterx.app.data.UsageLevel
 import com.meterx.app.data.dailyConsumptionFor
@@ -126,6 +132,7 @@ import kotlin.math.roundToInt
 fun MeterXApp(viewModel: MeterViewModel) {
     val authState by viewModel.authState.collectAsStateWithLifecycle()
     val meters by viewModel.meters.collectAsStateWithLifecycle()
+    val paymentMethods by viewModel.paymentMethods.collectAsStateWithLifecycle()
     val importPreview by viewModel.importPreview.collectAsStateWithLifecycle()
     val reminderSettings by viewModel.reminderSettings.collectAsStateWithLifecycle()
     val syncStatus by viewModel.syncStatus.collectAsStateWithLifecycle()
@@ -189,6 +196,9 @@ fun MeterXApp(viewModel: MeterViewModel) {
             },
             changingPassword = passwordChanging,
             onChangePassword = viewModel::changePassword,
+            paymentMethods = paymentMethods,
+            onAddPaymentMethod = viewModel::addPaymentMethod,
+            onDeletePaymentMethod = viewModel::deletePaymentMethod,
             onLogout = {
                 showSettings = false
                 viewModel.logout()
@@ -215,15 +225,16 @@ fun MeterXApp(viewModel: MeterViewModel) {
             item = selectedMeter,
             snackbarHostState = snackbarHostState,
             onBack = { selectedMeterId = null },
-            onAddReading = { value, date, billed ->
-                viewModel.addReading(selectedMeter.meter, value, date, billed)
-            },
-            onUpdateReading = { reading, value, date, billed ->
-                viewModel.updateReading(selectedMeter.meter, reading, value, date, billed)
-            },
             onDeleteReading = viewModel::deleteReading,
             onReset = { reading ->
                 viewModel.resetFreeUnits(selectedMeter.meter, reading)
+            },
+            paymentMethods = paymentMethods,
+            onAddReading = { value, date, billed, payment ->
+                viewModel.addReading(selectedMeter.meter, value, date, billed, payment)
+            },
+            onUpdateReading = { reading, value, date, billed, payment ->
+                viewModel.updateReading(selectedMeter.meter, reading, value, date, billed, payment)
             },
         )
     } else {
@@ -542,12 +553,16 @@ private fun SettingsScreen(
     onImport: () -> Unit,
     changingPassword: Boolean,
     onChangePassword: (String, String) -> Unit,
+    paymentMethods: List<PaymentMethodEntity>,
+    onAddPaymentMethod: (String) -> Unit,
+    onDeletePaymentMethod: (PaymentMethodEntity) -> Unit,
     onLogout: () -> Unit,
     onReminderEnabledChange: (Boolean) -> Unit,
     onReminderTimeChange: (Int, Int) -> Unit,
 ) {
     var showTimePicker by rememberSaveable { mutableStateOf(false) }
     var showChangePassword by rememberSaveable { mutableStateOf(false) }
+    var showAddPaymentMethod by rememberSaveable { mutableStateOf(false) }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -595,6 +610,20 @@ private fun SettingsScreen(
             }
             item {
                 DataTransferCard(onExport = onExport, onImport = onImport)
+            }
+            item {
+                Text(
+                    "Payment options",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            item {
+                PaymentMethodsCard(
+                    methods = paymentMethods,
+                    onAdd = { showAddPaymentMethod = true },
+                    onDelete = onDeletePaymentMethod,
+                )
             }
             item {
                 Card(
@@ -660,6 +689,103 @@ private fun SettingsScreen(
             },
         )
     }
+
+    if (showAddPaymentMethod) {
+        AddPaymentMethodDialog(
+            onDismiss = { showAddPaymentMethod = false },
+            onSave = { name ->
+                onAddPaymentMethod(name)
+                showAddPaymentMethod = false
+            },
+        )
+    }
+}
+
+@Composable
+private fun PaymentMethodsCard(
+    methods: List<PaymentMethodEntity>,
+    onAdd: () -> Unit,
+    onDelete: (PaymentMethodEntity) -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                "Where you pay from",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            if (methods.isEmpty()) {
+                Text(
+                    "Default options like Cash and Amazon Pay are available when recording a payment.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                methods.forEach { method ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(method.name, modifier = Modifier.weight(1f))
+                        IconButton(onClick = { onDelete(method) }) {
+                            Icon(
+                                Icons.Rounded.DeleteOutline,
+                                contentDescription = "Delete payment option",
+                            )
+                        }
+                    }
+                }
+            }
+            OutlinedButton(
+                onClick = onAdd,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Add payment option")
+            }
+        }
+    }
+}
+
+@Composable
+private fun AddPaymentMethodDialog(
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+) {
+    var name by rememberSaveable { mutableStateOf("") }
+    var attempted by rememberSaveable { mutableStateOf(false) }
+    val valid = name.trim().isNotEmpty()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add payment option") },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Name") },
+                placeholder = { Text("Amazon Pay, Cash, PhonePe") },
+                singleLine = true,
+                isError = attempted && !valid,
+            )
+        },
+        confirmButton = {
+            Button(onClick = {
+                attempted = true
+                if (valid) onSave(name.trim())
+            }) {
+                Text("Add")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
 }
 
 @Composable
@@ -1171,10 +1297,11 @@ private fun MeterDetailScreen(
     item: MeterWithReadings,
     snackbarHostState: SnackbarHostState,
     onBack: () -> Unit,
-    onAddReading: (Double, Long, Boolean) -> Unit,
-    onUpdateReading: (ReadingEntity, Double, Long, Boolean) -> Unit,
     onDeleteReading: (ReadingEntity) -> Unit,
     onReset: (ReadingEntity) -> Unit,
+    paymentMethods: List<PaymentMethodEntity>,
+    onAddReading: (Double, Long, Boolean, PaymentInput?) -> Unit,
+    onUpdateReading: (ReadingEntity, Double, Long, Boolean, PaymentInput?) -> Unit,
 ) {
     var showAddReading by rememberSaveable { mutableStateOf(false) }
     var editingReading by remember { mutableStateOf<ReadingEntity?>(null) }
@@ -1260,6 +1387,7 @@ private fun MeterDetailScreen(
                 items(item.sortedReadings, key = { it.id }) { reading ->
                     ReadingRow(
                         reading = reading,
+                        payment = item.paymentFor(reading),
                         dailyConsumption = item.dailyConsumptionFor(reading),
                         onEdit = { editingReading = reading },
                         onDelete = { pendingDelete = reading },
@@ -1273,9 +1401,10 @@ private fun MeterDetailScreen(
     if (showAddReading) {
         ReadingDialog(
             latestValue = item.latestReading?.value,
+            paymentMethods = paymentMethods,
             onDismiss = { showAddReading = false },
-            onSave = { value, date, billed ->
-                onAddReading(value, date, billed)
+            onSave = { value, date, billed, payment ->
+                onAddReading(value, date, billed, payment)
                 showAddReading = false
             },
         )
@@ -1283,12 +1412,14 @@ private fun MeterDetailScreen(
     editingReading?.let { reading ->
         ReadingDialog(
             reading = reading,
+            payment = item.paymentFor(reading),
             latestValue = item.latestReading
                 ?.takeUnless { it.id == reading.id }
                 ?.value,
+            paymentMethods = paymentMethods,
             onDismiss = { editingReading = null },
-            onSave = { value, date, billed ->
-                onUpdateReading(reading, value, date, billed)
+            onSave = { value, date, billed, payment ->
+                onUpdateReading(reading, value, date, billed, payment)
                 editingReading = null
             },
         )
@@ -1385,6 +1516,7 @@ private fun MeterSummary(item: MeterWithReadings) {
 @Composable
 private fun ReadingRow(
     reading: ReadingEntity,
+    payment: PaymentRecordEntity?,
     dailyConsumption: com.meterx.app.data.DailyConsumption?,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
@@ -1421,14 +1553,37 @@ private fun ReadingRow(
                 }
             }
             if (reading.isBilled) {
-                Icon(
-                    Icons.Rounded.CheckCircle,
-                    contentDescription = "Billed",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp),
-                )
-                Spacer(Modifier.width(4.dp))
-                Text("Billed", color = MaterialTheme.colorScheme.primary)
+                Column(horizontalAlignment = Alignment.End) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Rounded.CheckCircle,
+                            contentDescription = "Billed",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text("Billed", color = MaterialTheme.colorScheme.primary)
+                    }
+                    if (payment != null) {
+                        Text(
+                            "${formatCurrency(payment.amount)} • ${payment.methodName}",
+                            color = MaterialTheme.colorScheme.secondary,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        Text(
+                            formatDate(payment.paymentDate),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    } else {
+                        Text(
+                            "Payment pending",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
             }
             IconButton(onClick = onEdit) {
                 Icon(Icons.Rounded.Edit, contentDescription = "Edit reading")
@@ -1444,10 +1599,13 @@ private fun ReadingRow(
 @Composable
 private fun ReadingDialog(
     reading: ReadingEntity? = null,
+    payment: PaymentRecordEntity? = null,
     latestValue: Double?,
+    paymentMethods: List<PaymentMethodEntity>,
     onDismiss: () -> Unit,
-    onSave: (Double, Long, Boolean) -> Unit,
+    onSave: (Double, Long, Boolean, PaymentInput?) -> Unit,
 ) {
+    val methodOptions = paymentMethodNames(paymentMethods, payment?.methodName)
     var value by rememberSaveable(reading?.id) {
         mutableStateOf(reading?.value?.let(::formatUnit).orEmpty())
     }
@@ -1457,10 +1615,24 @@ private fun ReadingDialog(
     var billed by rememberSaveable(reading?.id) {
         mutableStateOf(reading?.isBilled ?: false)
     }
+    var paymentAmount by rememberSaveable(reading?.id) {
+        mutableStateOf(payment?.amount?.let(::formatAmount).orEmpty())
+    }
+    var paymentDate by rememberSaveable(reading?.id) {
+        mutableLongStateOf(payment?.paymentDate ?: LocalDate.now().toEpochDay())
+    }
+    var selectedMethod by rememberSaveable(reading?.id) {
+        mutableStateOf(payment?.methodName ?: methodOptions.first())
+    }
     var showDatePicker by rememberSaveable { mutableStateOf(false) }
+    var showPaymentDatePicker by rememberSaveable { mutableStateOf(false) }
+    var methodExpanded by rememberSaveable { mutableStateOf(false) }
     var attempted by rememberSaveable { mutableStateOf(false) }
     val parsedValue = value.toDoubleOrNull()
-    val valid = parsedValue != null && parsedValue >= 0
+    val parsedPaymentAmount = paymentAmount.toDoubleOrNull()
+    val paymentValid = !billed ||
+        (parsedPaymentAmount != null && parsedPaymentAmount > 0 && selectedMethod.isNotBlank())
+    val valid = parsedValue != null && parsedValue >= 0 && paymentValid
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1500,12 +1672,82 @@ private fun ReadingDialog(
                     }
                     Switch(checked = billed, onCheckedChange = { billed = it })
                 }
+                AnimatedVisibility(visible = billed) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        OutlinedTextField(
+                            value = paymentAmount,
+                            onValueChange = { paymentAmount = it.filterDecimal() },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Payment amount *") },
+                            prefix = { Text("₹") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            isError = attempted &&
+                                (parsedPaymentAmount == null || parsedPaymentAmount <= 0),
+                            singleLine = true,
+                        )
+                        OutlinedButton(
+                            onClick = { showPaymentDatePicker = true },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("Paid on ${formatDate(paymentDate)}")
+                        }
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            OutlinedButton(
+                                onClick = { methodExpanded = true },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(
+                                    selectedMethod,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Icon(
+                                    Icons.Rounded.KeyboardArrowDown,
+                                    contentDescription = null,
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = methodExpanded,
+                                onDismissRequest = { methodExpanded = false },
+                            ) {
+                                methodOptions.forEach { method ->
+                                    DropdownMenuItem(
+                                        text = { Text(method) },
+                                        onClick = {
+                                            selectedMethod = method
+                                            methodExpanded = false
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                        if (attempted && !paymentValid) {
+                            Text(
+                                "Enter the paid amount and payment app.",
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
             Button(onClick = {
                 attempted = true
-                if (valid) onSave(parsedValue!!, selectedDate, billed)
+                if (valid) {
+                    val paymentInput = if (billed) {
+                        PaymentInput(
+                            amount = parsedPaymentAmount!!,
+                            paymentDate = paymentDate,
+                            methodName = selectedMethod,
+                        )
+                    } else {
+                        null
+                    }
+                    onSave(parsedValue!!, selectedDate, billed, paymentInput)
+                }
             }) { Text(if (reading == null) "Add reading" else "Save changes") }
         },
         dismissButton = {
@@ -1534,6 +1776,33 @@ private fun ReadingDialog(
             },
             dismissButton = {
                 TextButton(onClick = { showDatePicker = false }) { Text("Cancel") }
+            },
+        ) {
+            DatePicker(state = state)
+        }
+    }
+
+    if (showPaymentDatePicker) {
+        val initialMillis = LocalDate.ofEpochDay(paymentDate)
+            .atStartOfDay(ZoneOffset.UTC)
+            .toInstant()
+            .toEpochMilli()
+        val state = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
+        DatePickerDialog(
+            onDismissRequest = { showPaymentDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    state.selectedDateMillis?.let {
+                        paymentDate = Instant.ofEpochMilli(it)
+                            .atZone(ZoneOffset.UTC)
+                            .toLocalDate()
+                            .toEpochDay()
+                    }
+                    showPaymentDatePicker = false
+                }) { Text("Done") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPaymentDatePicker = false }) { Text("Cancel") }
             },
         ) {
             DatePicker(state = state)
@@ -1590,11 +1859,26 @@ private fun MeterType.displayName(): String =
 private fun formatUnit(value: Double): String =
     if (value % 1.0 == 0.0) value.toLong().toString() else "%.2f".format(value)
 
+private fun formatAmount(value: Double): String =
+    if (value % 1.0 == 0.0) value.toLong().toString() else "%.2f".format(value)
+
+private fun formatCurrency(value: Double): String = "₹${formatAmount(value)}"
+
 private fun formatDate(epochDay: Long): String =
     LocalDate.ofEpochDay(epochDay).format(DateTimeFormatter.ofPattern("d MMM yyyy"))
 
 private fun formatReminderTime(hour: Int, minute: Int): String =
     LocalTime.of(hour, minute).format(DateTimeFormatter.ofPattern("h:mm a"))
+
+private fun paymentMethodNames(
+    methods: List<PaymentMethodEntity>,
+    selected: String?,
+): List<String> =
+    (methods.map { it.name } + listOfNotNull(selected) + listOf("Cash", "Amazon Pay"))
+        .map(String::trim)
+        .filter(String::isNotEmpty)
+        .distinctBy { it.lowercase() }
+        .sortedWith(String.CASE_INSENSITIVE_ORDER)
 
 private fun String.filterDecimal(): String {
     var dotSeen = false
