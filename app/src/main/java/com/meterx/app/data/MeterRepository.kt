@@ -40,6 +40,24 @@ class MeterRepository(
         syncBackup()
     }
 
+    suspend fun updateMeter(
+        meter: MeterEntity,
+        nickname: String,
+        meterNumber: String,
+        consumerNumber: String?,
+        freeUnits: Double?,
+    ) {
+        dao.updateMeter(
+            meter.copy(
+                nickname = nickname.trim(),
+                meterNumber = meterNumber.trim(),
+                consumerNumber = consumerNumber?.trim()?.takeIf(String::isNotEmpty),
+                freeUnits = freeUnits.takeIf { meter.type == MeterType.ELECTRICITY },
+            ),
+        )
+        syncBackup()
+    }
+
     suspend fun addReading(
         meter: MeterEntity,
         value: Double,

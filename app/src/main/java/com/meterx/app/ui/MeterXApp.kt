@@ -233,6 +233,15 @@ fun MeterXApp(viewModel: MeterViewModel) {
             onReset = { reading ->
                 viewModel.resetFreeUnits(selectedMeter.meter, reading)
             },
+            onUpdateMeter = { nickname, meterNumber, consumerNumber, freeUnits ->
+                viewModel.updateMeter(
+                    selectedMeter.meter,
+                    nickname,
+                    meterNumber,
+                    consumerNumber,
+                    freeUnits,
+                )
+            },
             paymentMethods = paymentMethods,
             onAddReading = { value, date, billed, payment ->
                 viewModel.addReading(selectedMeter.meter, value, date, billed, payment)
@@ -509,9 +518,24 @@ private fun MeterListScreen(
                     }
                 }
             }
+            item {
+                HomeDashboardCard(
+                    meters = meters,
+                    username = username,
+                    syncStatus = syncStatus,
+                    onSync = onSync,
+                )
+            }
             if (meters.isEmpty()) {
                 item { EmptyMetersCard(onAdd = { showAddMeter = true }) }
             } else {
+                item {
+                    Text(
+                        "Your meters",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
                 items(meters, key = { it.meter.id }) { item ->
                     MeterCard(
                         item = item,
@@ -544,6 +568,117 @@ private fun MeterListScreen(
                 pendingDelete = null
             },
         )
+    }
+}
+
+@Composable
+private fun HomeDashboardCard(
+    meters: List<MeterWithReadings>,
+    username: String,
+    syncStatus: MeterViewModel.SyncStatus,
+    onSync: () -> Unit,
+) {
+    val totalReadings = meters.sumOf { it.readings.size }
+    val totalPayments = meters.sumOf { item -> item.payments.sumOf { it.amount } }
+    val billedReadings = meters.sumOf { item -> item.readings.count(ReadingEntity::isBilled) }
+    val electricityAlerts = meters.count { item ->
+        val level = item.usageStatus()?.level
+        level == UsageLevel.NEAR_LIMIT || level == UsageLevel.OVER_LIMIT
+    }
+    val latestPayment = meters
+        .flatMap { it.payments }
+        .maxWithOrNull(compareBy<PaymentRecordEntity> { it.paymentDate }.thenBy { it.createdAt })
+    val latestReading = meters
+        .flatMap { it.readings }
+        .maxWithOrNull(compareBy<ReadingEntity> { it.readingDate }.thenBy { it.createdAt })
+    val syncText = when (syncStatus) {
+        MeterViewModel.SyncStatus.SYNCED -> "Cloud synced"
+        MeterViewModel.SyncStatus.SYNCING -> "Syncing now"
+        MeterViewModel.SyncStatus.ERROR -> "Sync needs attention"
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "Home dashboard",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        "Hi $username, here is your meter snapshot.",
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                }
+                CloudSyncButton(status = syncStatus, onClick = onSync)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                DashboardMetric("Meters", meters.size.toString(), Modifier.weight(1f))
+                DashboardMetric("Readings", totalReadings.toString(), Modifier.weight(1f))
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                DashboardMetric("Bills", billedReadings.toString(), Modifier.weight(1f))
+                DashboardMetric("Paid", formatCurrency(totalPayments), Modifier.weight(1f))
+            }
+            Text(
+                when {
+                    electricityAlerts > 0 -> "$electricityAlerts electricity meter needs attention."
+                    latestPayment != null -> "Last payment ${formatCurrency(latestPayment.amount)} via ${latestPayment.methodName}."
+                    latestReading != null -> "Latest reading ${formatUnit(latestReading.value)} units on ${formatDate(latestReading.readingDate)}."
+                    else -> "Add your first reading to start seeing trends here."
+                },
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                fontWeight = FontWeight.Medium,
+            )
+            Text(
+                syncText,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DashboardMetric(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+) {
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
+        ),
+        shape = RoundedCornerShape(18.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                value,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                label,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
     }
 }
 
@@ -1342,6 +1477,103 @@ private fun AddMeterSheet(
     }
 }
 
+@Composable
+private fun MeterSettingsDialog(
+    meter: MeterEntity,
+    onDismiss: () -> Unit,
+    onSave: (String, String, String?, Double?) -> Unit,
+) {
+    var nickname by rememberSaveable(meter.id) { mutableStateOf(meter.nickname) }
+    var meterNumber by rememberSaveable(meter.id) { mutableStateOf(meter.meterNumber) }
+    var consumerNumber by rememberSaveable(meter.id) {
+        mutableStateOf(meter.consumerNumber.orEmpty())
+    }
+    var freeUnits by rememberSaveable(meter.id) {
+        mutableStateOf(meter.freeUnits?.let(::formatUnit).orEmpty())
+    }
+    var attempted by rememberSaveable { mutableStateOf(false) }
+    val parsedFreeUnits = freeUnits.toDoubleOrNull()
+    val valid = nickname.isNotBlank() &&
+        meterNumber.isNotBlank() &&
+        (
+            meter.type != MeterType.ELECTRICITY ||
+                freeUnits.isBlank() ||
+                (parsedFreeUnits != null && parsedFreeUnits > 0)
+            )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Meter settings") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    meter.type.displayName(),
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                OutlinedTextField(
+                    value = nickname,
+                    onValueChange = { nickname = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Nickname *") },
+                    singleLine = true,
+                    isError = attempted && nickname.isBlank(),
+                )
+                OutlinedTextField(
+                    value = meterNumber,
+                    onValueChange = { meterNumber = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Meter number *") },
+                    singleLine = true,
+                    isError = attempted && meterNumber.isBlank(),
+                )
+                OutlinedTextField(
+                    value = consumerNumber,
+                    onValueChange = { consumerNumber = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Consumer number") },
+                    singleLine = true,
+                )
+                if (meter.type == MeterType.ELECTRICITY) {
+                    OutlinedTextField(
+                        value = freeUnits,
+                        onValueChange = { freeUnits = it.filterDecimal() },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Monthly free units") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        isError = attempted &&
+                            freeUnits.isNotBlank() &&
+                            (parsedFreeUnits == null || parsedFreeUnits <= 0),
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                attempted = true
+                if (valid) {
+                    onSave(
+                        nickname,
+                        meterNumber,
+                        consumerNumber.takeIf(String::isNotBlank),
+                        if (meter.type == MeterType.ELECTRICITY) {
+                            parsedFreeUnits ?: meter.freeUnits
+                        } else {
+                            null
+                        },
+                    )
+                }
+            }) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MeterDetailScreen(
@@ -1350,6 +1582,7 @@ private fun MeterDetailScreen(
     onBack: () -> Unit,
     onDeleteReading: (ReadingEntity) -> Unit,
     onReset: (ReadingEntity) -> Unit,
+    onUpdateMeter: (String, String, String?, Double?) -> Unit,
     paymentMethods: List<PaymentMethodEntity>,
     onAddReading: (Double, Long, Boolean, PaymentInput?) -> Unit,
     onUpdateReading: (ReadingEntity, Double, Long, Boolean, PaymentInput?) -> Unit,
@@ -1358,6 +1591,7 @@ private fun MeterDetailScreen(
     var editingReading by remember { mutableStateOf<ReadingEntity?>(null) }
     var pendingDelete by remember { mutableStateOf<ReadingEntity?>(null) }
     var pendingReset by remember { mutableStateOf<ReadingEntity?>(null) }
+    var showMeterSettings by rememberSaveable { mutableStateOf(false) }
     val latestBilledReading = item.latestReading?.takeIf { it.isBilled }
 
     Scaffold(
@@ -1377,6 +1611,11 @@ private fun MeterDetailScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { showMeterSettings = true }) {
+                        Icon(Icons.Rounded.Settings, contentDescription = "Meter settings")
                     }
                 },
             )
@@ -1501,6 +1740,16 @@ private fun MeterDetailScreen(
             },
             dismissButton = {
                 TextButton(onClick = { pendingReset = null }) { Text("Cancel") }
+            },
+        )
+    }
+    if (showMeterSettings) {
+        MeterSettingsDialog(
+            meter = item.meter,
+            onDismiss = { showMeterSettings = false },
+            onSave = { nickname, meterNumber, consumerNumber, freeUnits ->
+                onUpdateMeter(nickname, meterNumber, consumerNumber, freeUnits)
+                showMeterSettings = false
             },
         )
     }

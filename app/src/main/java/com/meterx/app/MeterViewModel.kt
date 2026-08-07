@@ -188,6 +188,18 @@ class MeterViewModel(
         syncOperation { repository.deleteMeter(meter) }
     }
 
+    fun updateMeter(
+        meter: MeterEntity,
+        nickname: String,
+        meterNumber: String,
+        consumerNumber: String?,
+        freeUnits: Double?,
+    ) = viewModelScope.launch {
+        syncOperation {
+            repository.updateMeter(meter, nickname, meterNumber, consumerNumber, freeUnits)
+        }
+    }
+
     fun addReading(
         meter: MeterEntity,
         value: Double,
