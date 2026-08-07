@@ -8,9 +8,9 @@ const config = {
   JWT_SECRET: "test-secret-that-is-at-least-thirty-two-characters",
   JWT_EXPIRES_IN: "1h",
   CORS_ORIGIN: "*",
-  APP_LATEST_VERSION_CODE: 6,
-  APP_LATEST_VERSION_NAME: "1.5",
-  APP_MIN_SUPPORTED_VERSION_CODE: 6,
+  APP_LATEST_VERSION_CODE: 7,
+  APP_LATEST_VERSION_NAME: "1.6",
+  APP_MIN_SUPPORTED_VERSION_CODE: 7,
   APP_APK_URL: "https://example.com/meterx.apk",
   APP_RELEASE_NOTES: "Test update.",
 };
@@ -36,9 +36,9 @@ test("app update endpoint reports latest version", async () => {
   const response = await request(createApp(config)).get("/api/app/latest");
 
   assert.equal(response.status, 200);
-  assert.equal(response.body.latestVersionCode, 6);
-  assert.equal(response.body.latestVersionName, "1.5");
-  assert.equal(response.body.minSupportedVersionCode, 6);
+  assert.equal(response.body.latestVersionCode, 7);
+  assert.equal(response.body.latestVersionName, "1.6");
+  assert.equal(response.body.minSupportedVersionCode, 7);
   assert.equal(response.body.apkUrl, "https://example.com/meterx.apk");
   assert.equal(response.body.forceUpdate, true);
 });

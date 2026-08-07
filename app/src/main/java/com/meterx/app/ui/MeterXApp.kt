@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -165,6 +166,13 @@ fun MeterXApp(viewModel: MeterViewModel) {
 
     LaunchedEffect(viewModel) {
         viewModel.messages.collectLatest(snackbarHostState::showSnackbar)
+    }
+
+    BackHandler(enabled = showSettings) {
+        showSettings = false
+    }
+    BackHandler(enabled = !showSettings && selectedMeter != null) {
+        selectedMeterId = null
     }
 
     if (!authState.initialized || (authState.loading && authState.user != null)) {
@@ -1326,9 +1334,16 @@ private fun MeterCard(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        "${item.meter.type.displayName()}  •  ${item.meter.meterNumber}",
+                        "${item.meter.type.displayName()} meter: ${item.meter.meterNumber}",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        "Consumer: ${item.meter.consumerNumber ?: "Not set"}",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
                 IconButton(onClick = onDelete) {
