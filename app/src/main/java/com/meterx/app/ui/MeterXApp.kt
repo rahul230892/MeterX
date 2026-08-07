@@ -14,6 +14,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -100,8 +101,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -589,13 +594,16 @@ private fun HomeDashboardCard(
     val totalReadings = meters.sumOf { it.readings.size }
     val totalPayments = meters.sumOf { item -> item.payments.sumOf { it.amount } }
     val billedReadings = meters.sumOf { item -> item.readings.count(ReadingEntity::isBilled) }
+    val billPoints = meters.flatMap(::billStats)
+        .sortedWith(compareBy<BillStat> { it.generatedDate }.thenBy { it.createdAt })
+        .takeLast(8)
+        .map { ChartPoint(formatShortDate(it.generatedDate), it.amount) }
     val electricityAlerts = meters.count { item ->
         val level = item.usageStatus()?.level
         level == UsageLevel.NEAR_LIMIT || level == UsageLevel.OVER_LIMIT
     }
-    val latestPayment = meters
-        .flatMap { it.payments }
-        .maxWithOrNull(compareBy<PaymentRecordEntity> { it.paymentDate }.thenBy { it.createdAt })
+    val latestBill = meters.flatMap(::billStats)
+        .maxWithOrNull(compareBy<BillStat> { it.generatedDate }.thenBy { it.createdAt })
     val latestReading = meters
         .flatMap { it.readings }
         .maxWithOrNull(compareBy<ReadingEntity> { it.readingDate }.thenBy { it.createdAt })
@@ -638,10 +646,17 @@ private fun HomeDashboardCard(
                 DashboardMetric("Bills", billedReadings.toString(), Modifier.weight(1f))
                 DashboardMetric("Paid", formatCurrency(totalPayments), Modifier.weight(1f))
             }
+            MiniLineChart(
+                title = "Bill amount trend",
+                emptyText = "Mark readings as billed and add bill amount to see the bill trend.",
+                points = billPoints,
+                valueFormatter = ::formatCurrency,
+                lineColor = MaterialTheme.colorScheme.primary,
+            )
             Text(
                 when {
                     electricityAlerts > 0 -> "$electricityAlerts electricity meter needs attention."
-                    latestPayment != null -> "Last payment ${formatCurrency(latestPayment.amount)} via ${latestPayment.methodName}."
+                    latestBill != null -> "Latest bill ${formatCurrency(latestBill.amount)} generated on ${formatDate(latestBill.generatedDate)}."
                     latestReading != null -> "Latest reading ${formatUnit(latestReading.value)} units on ${formatDate(latestReading.readingDate)}."
                     else -> "Add your first reading to start seeing trends here."
                 },
@@ -1649,6 +1664,7 @@ private fun MeterDetailScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item { MeterSummary(item) }
+            item { MeterStatisticsCard(item) }
             if (item.meter.type == MeterType.ELECTRICITY && latestBilledReading != null) {
                 item {
                     Card(
@@ -1824,6 +1840,185 @@ private fun MeterSummary(item: MeterWithReadings) {
                     fontWeight = FontWeight.SemiBold,
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun MeterStatisticsCard(item: MeterWithReadings) {
+    val readingPoints = item.readings
+        .sortedWith(compareBy<ReadingEntity> { it.readingDate }.thenBy { it.createdAt })
+        .takeLast(10)
+        .map { ChartPoint(formatShortDate(it.readingDate), it.value) }
+    val billPoints = billStats(item)
+        .sortedWith(compareBy<BillStat> { it.generatedDate }.thenBy { it.createdAt })
+        .takeLast(10)
+        .map { ChartPoint(formatShortDate(it.generatedDate), it.amount) }
+    val averageBill = billPoints
+        .map(ChartPoint::value)
+        .takeIf { it.isNotEmpty() }
+        ?.average()
+    val highestBill = billPoints.maxOfOrNull(ChartPoint::value)
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(
+                "Statistics",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            MiniLineChart(
+                title = "Reading trend",
+                emptyText = "Add at least two readings to see the meter trend.",
+                points = readingPoints,
+                valueFormatter = { "${formatUnit(it)} units" },
+                lineColor = MaterialTheme.colorScheme.primary,
+            )
+            MiniLineChart(
+                title = "Bill amount trend",
+                emptyText = "Mark readings as billed and enter amount to see bill trend.",
+                points = billPoints,
+                valueFormatter = ::formatCurrency,
+                lineColor = MaterialTheme.colorScheme.tertiary,
+            )
+            if (billPoints.isNotEmpty()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    DashboardMetric(
+                        label = "Avg bill",
+                        value = formatCurrency(averageBill ?: 0.0),
+                        modifier = Modifier.weight(1f),
+                    )
+                    DashboardMetric(
+                        label = "Highest bill",
+                        value = formatCurrency(highestBill ?: 0.0),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Text(
+                    "Bill stats use the bill generated date from the billed reading.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MiniLineChart(
+    title: String,
+    emptyText: String,
+    points: List<ChartPoint>,
+    valueFormatter: (Double) -> String,
+    lineColor: Color,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                title,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            points.lastOrNull()?.let {
+                Text(
+                    valueFormatter(it.value),
+                    color = lineColor,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
+        if (points.size < 2) {
+            Text(
+                emptyText,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            return@Column
+        }
+
+        val gridColor = MaterialTheme.colorScheme.outlineVariant
+        val fillColor = lineColor.copy(alpha = 0.12f)
+        val pointColor = MaterialTheme.colorScheme.surface
+        Canvas(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(150.dp),
+        ) {
+            val topPadding = 14.dp.toPx()
+            val bottomPadding = 18.dp.toPx()
+            val chartHeight = size.height - topPadding - bottomPadding
+            val minValue = points.minOf(ChartPoint::value)
+            val maxValue = points.maxOf(ChartPoint::value)
+            val valueRange = (maxValue - minValue).takeIf { it > 0.0 } ?: 1.0
+            val coordinates = points.mapIndexed { index, point ->
+                val x = if (points.lastIndex == 0) {
+                    size.width / 2f
+                } else {
+                    (index.toFloat() / points.lastIndex.toFloat()) * size.width
+                }
+                val normalized = ((point.value - minValue) / valueRange).toFloat()
+                val y = topPadding + chartHeight - (normalized * chartHeight)
+                Offset(x, y)
+            }
+            drawLine(
+                color = gridColor,
+                start = Offset(0f, topPadding),
+                end = Offset(size.width, topPadding),
+                strokeWidth = 1.dp.toPx(),
+            )
+            drawLine(
+                color = gridColor,
+                start = Offset(0f, topPadding + chartHeight / 2f),
+                end = Offset(size.width, topPadding + chartHeight / 2f),
+                strokeWidth = 1.dp.toPx(),
+            )
+            drawLine(
+                color = gridColor,
+                start = Offset(0f, topPadding + chartHeight),
+                end = Offset(size.width, topPadding + chartHeight),
+                strokeWidth = 1.dp.toPx(),
+            )
+
+            val areaPath = Path().apply {
+                moveTo(coordinates.first().x, topPadding + chartHeight)
+                coordinates.forEach { lineTo(it.x, it.y) }
+                lineTo(coordinates.last().x, topPadding + chartHeight)
+                close()
+            }
+            drawPath(path = areaPath, color = fillColor)
+
+            val linePath = Path().apply {
+                moveTo(coordinates.first().x, coordinates.first().y)
+                coordinates.drop(1).forEach { lineTo(it.x, it.y) }
+            }
+            drawPath(
+                path = linePath,
+                color = lineColor,
+                style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round),
+            )
+            coordinates.forEach {
+                drawCircle(color = pointColor, radius = 4.5.dp.toPx(), center = it)
+                drawCircle(color = lineColor, radius = 3.dp.toPx(), center = it)
+            }
+        }
+        Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+            Text(
+                points.first().label,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                points.last().label,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
     }
 }
@@ -2171,6 +2366,28 @@ private fun MeterType.icon(): ImageVector = when (this) {
 private fun MeterType.displayName(): String =
     name.lowercase().replaceFirstChar(Char::uppercase)
 
+private data class ChartPoint(
+    val label: String,
+    val value: Double,
+)
+
+private data class BillStat(
+    val generatedDate: Long,
+    val amount: Double,
+    val createdAt: Long,
+)
+
+private fun billStats(item: MeterWithReadings): List<BillStat> =
+    item.readings.mapNotNull { reading ->
+        if (!reading.isBilled) return@mapNotNull null
+        val payment = item.paymentFor(reading) ?: return@mapNotNull null
+        BillStat(
+            generatedDate = reading.readingDate,
+            amount = payment.amount,
+            createdAt = reading.createdAt,
+        )
+    }
+
 private fun formatUnit(value: Double): String =
     if (value % 1.0 == 0.0) value.toLong().toString() else "%.2f".format(value)
 
@@ -2181,6 +2398,9 @@ private fun formatCurrency(value: Double): String = "₹${formatAmount(value)}"
 
 private fun formatDate(epochDay: Long): String =
     LocalDate.ofEpochDay(epochDay).format(DateTimeFormatter.ofPattern("d MMM yyyy"))
+
+private fun formatShortDate(epochDay: Long): String =
+    LocalDate.ofEpochDay(epochDay).format(DateTimeFormatter.ofPattern("d MMM"))
 
 private fun formatReminderTime(hour: Int, minute: Int): String =
     LocalTime.of(hour, minute).format(DateTimeFormatter.ofPattern("h:mm a"))
