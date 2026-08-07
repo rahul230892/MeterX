@@ -55,6 +55,15 @@ data class CloudPayment(
     val createdAt: Long,
 )
 
+data class AppUpdateInfo(
+    val latestVersionCode: Int,
+    val latestVersionName: String,
+    val minSupportedVersionCode: Int,
+    val apkUrl: String,
+    val releaseNotes: String,
+    val forceUpdate: Boolean,
+)
+
 class MeterApi(baseUrl: String) {
     private val baseUrl = baseUrl.trimEnd('/')
 
@@ -83,6 +92,18 @@ class MeterApi(baseUrl: String) {
                 .put("newPassword", newPassword),
         )
         response.toAuthResult()
+    }
+
+    suspend fun latestAppVersion(): AppUpdateInfo = withContext(Dispatchers.IO) {
+        val response = request("GET", "/api/app/latest")
+        AppUpdateInfo(
+            latestVersionCode = response.getInt("latestVersionCode"),
+            latestVersionName = response.getString("latestVersionName"),
+            minSupportedVersionCode = response.getInt("minSupportedVersionCode"),
+            apkUrl = response.getString("apkUrl"),
+            releaseNotes = response.optString("releaseNotes"),
+            forceUpdate = response.optBoolean("forceUpdate", true),
+        )
     }
 
     suspend fun downloadSnapshot(token: String): CloudSnapshot = withContext(Dispatchers.IO) {

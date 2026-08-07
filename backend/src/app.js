@@ -1,3 +1,5 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import cors from "cors";
 import express from "express";
 import rateLimit from "express-rate-limit";
@@ -8,6 +10,11 @@ import { createAuthRouter } from "./routes/authRoutes.js";
 import { createMeterRouter } from "./routes/meterRoutes.js";
 import { createReadingRouter } from "./routes/readingRoutes.js";
 import { createSyncRouter } from "./routes/syncRoutes.js";
+
+const publicDirectory = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../public",
+);
 
 export function createApp(config) {
   const app = express();
@@ -27,6 +34,17 @@ export function createApp(config) {
 
   app.get("/health", (_request, response) => {
     response.json({ status: "ok", service: "meterx-backend" });
+  });
+  app.use("/downloads", express.static(path.join(publicDirectory, "downloads")));
+  app.get("/api/app/latest", (_request, response) => {
+    response.json({
+      latestVersionCode: config.APP_LATEST_VERSION_CODE,
+      latestVersionName: config.APP_LATEST_VERSION_NAME,
+      minSupportedVersionCode: config.APP_MIN_SUPPORTED_VERSION_CODE,
+      apkUrl: config.APP_APK_URL,
+      releaseNotes: config.APP_RELEASE_NOTES,
+      forceUpdate: true,
+    });
   });
   app.use("/api/auth", createAuthRouter(config));
 

@@ -4,6 +4,8 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.meterx.app.BuildConfig
+import com.meterx.app.data.AppUpdateInfo
 import com.meterx.app.data.AuthSession
 import com.meterx.app.data.AuthExpiredException
 import com.meterx.app.data.AuthUser
@@ -45,6 +47,11 @@ class MeterViewModel(
         val error: String? = null,
     )
 
+    data class AppUpdateUiState(
+        val checking: Boolean = false,
+        val update: AppUpdateInfo? = null,
+    )
+
     private val _authState = MutableStateFlow(AuthUiState(user = authSession.user.value))
     val authState: StateFlow<AuthUiState> = _authState.asStateFlow()
     private val _importPreview = MutableStateFlow<ImportPreview?>(null)
@@ -53,6 +60,8 @@ class MeterViewModel(
     val syncStatus: StateFlow<SyncStatus> = _syncStatus.asStateFlow()
     private val _passwordChanging = MutableStateFlow(false)
     val passwordChanging: StateFlow<Boolean> = _passwordChanging.asStateFlow()
+    private val _appUpdateState = MutableStateFlow(AppUpdateUiState())
+    val appUpdateState: StateFlow<AppUpdateUiState> = _appUpdateState.asStateFlow()
 
     private val _messages = MutableSharedFlow<String>()
     val messages: SharedFlow<String> = _messages.asSharedFlow()
@@ -71,6 +80,16 @@ class MeterViewModel(
         )
 
     init {
+        viewModelScope.launch {
+            _appUpdateState.value = AppUpdateUiState(checking = true)
+            runCatching { repository.checkForAppUpdate(BuildConfig.VERSION_CODE) }
+                .onSuccess { update ->
+                    _appUpdateState.value = AppUpdateUiState(update = update)
+                }
+                .onFailure {
+                    _appUpdateState.value = AppUpdateUiState()
+                }
+        }
         viewModelScope.launch {
             val existingUser = authSession.user.value
             if (existingUser == null) {

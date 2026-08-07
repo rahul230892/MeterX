@@ -182,6 +182,14 @@ class MeterRepository(
         uploadToCloud()
     }
 
+    suspend fun checkForAppUpdate(currentVersionCode: Int): AppUpdateInfo? {
+        val update = api.latestAppVersion()
+        return update.takeIf {
+            it.latestVersionCode > currentVersionCode ||
+                it.minSupportedVersionCode > currentVersionCode
+        }
+    }
+
     suspend fun changePassword(currentPassword: String, newPassword: String): AuthUser {
         val token = session.token ?: throw AuthExpiredException("Session expired.")
         try {

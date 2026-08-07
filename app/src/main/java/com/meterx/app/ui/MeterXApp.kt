@@ -1,7 +1,9 @@
 package com.meterx.app.ui
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -110,6 +112,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.content.ContextCompat
 import com.meterx.app.MeterViewModel
+import com.meterx.app.data.AppUpdateInfo
 import com.meterx.app.data.MeterEntity
 import com.meterx.app.data.MeterType
 import com.meterx.app.data.MeterWithReadings
@@ -137,6 +140,7 @@ fun MeterXApp(viewModel: MeterViewModel) {
     val reminderSettings by viewModel.reminderSettings.collectAsStateWithLifecycle()
     val syncStatus by viewModel.syncStatus.collectAsStateWithLifecycle()
     val passwordChanging by viewModel.passwordChanging.collectAsStateWithLifecycle()
+    val appUpdateState by viewModel.appUpdateState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     var selectedMeterId by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -270,6 +274,53 @@ fun MeterXApp(viewModel: MeterViewModel) {
             },
         )
     }
+
+    appUpdateState.update?.let { update ->
+        MandatoryUpdateDialog(
+            update = update,
+            onUpdate = {
+                context.startActivity(
+                    Intent(Intent.ACTION_VIEW, Uri.parse(update.apkUrl)),
+                )
+            },
+        )
+    }
+}
+
+@Composable
+private fun MandatoryUpdateDialog(
+    update: AppUpdateInfo,
+    onUpdate: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = {},
+        title = { Text("Update required") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("A new MeterX version is available and must be installed to continue.")
+                Text(
+                    "Latest version: ${update.latestVersionName}",
+                    fontWeight = FontWeight.SemiBold,
+                )
+                if (update.releaseNotes.isNotBlank()) {
+                    Text(
+                        update.releaseNotes,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Text(
+                    "Your meters, readings, payments, and settings stay on the phone during the update.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = onUpdate) {
+                Text("Download update")
+            }
+        },
+    )
 }
 
 @Composable

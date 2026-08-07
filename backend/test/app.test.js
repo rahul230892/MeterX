@@ -8,6 +8,11 @@ const config = {
   JWT_SECRET: "test-secret-that-is-at-least-thirty-two-characters",
   JWT_EXPIRES_IN: "1h",
   CORS_ORIGIN: "*",
+  APP_LATEST_VERSION_CODE: 5,
+  APP_LATEST_VERSION_NAME: "1.4",
+  APP_MIN_SUPPORTED_VERSION_CODE: 5,
+  APP_APK_URL: "https://example.com/meterx.apk",
+  APP_RELEASE_NOTES: "Test update.",
 };
 
 test("health endpoint reports service status", async () => {
@@ -25,6 +30,17 @@ test("protected sync endpoint rejects anonymous access", async () => {
 
   assert.equal(response.status, 401);
   assert.equal(response.body.error, "Authentication required.");
+});
+
+test("app update endpoint reports latest version", async () => {
+  const response = await request(createApp(config)).get("/api/app/latest");
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.latestVersionCode, 5);
+  assert.equal(response.body.latestVersionName, "1.4");
+  assert.equal(response.body.minSupportedVersionCode, 5);
+  assert.equal(response.body.apkUrl, "https://example.com/meterx.apk");
+  assert.equal(response.body.forceUpdate, true);
 });
 
 test("snapshot validation accepts MeterX Android data", () => {
