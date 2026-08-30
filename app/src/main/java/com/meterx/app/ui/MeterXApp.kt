@@ -17,6 +17,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,6 +39,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Logout
@@ -119,6 +121,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.content.ContextCompat
 import com.meterx.app.MeterViewModel
 import com.meterx.app.data.AppUpdateInfo
+import com.meterx.app.data.CustomFieldDefinition
 import com.meterx.app.data.MeterEntity
 import com.meterx.app.data.MeterType
 import com.meterx.app.data.MeterWithReadings
@@ -134,6 +137,7 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+import java.util.UUID
 import kotlinx.coroutines.flow.collectLatest
 import kotlin.math.roundToInt
 
@@ -246,21 +250,37 @@ fun MeterXApp(viewModel: MeterViewModel) {
             onReset = { reading ->
                 viewModel.resetFreeUnits(selectedMeter.meter, reading)
             },
-            onUpdateMeter = { nickname, meterNumber, consumerNumber, freeUnits ->
+            onUpdateMeter = { nickname, meterNumber, consumerNumber, freeUnits, customFields ->
                 viewModel.updateMeter(
                     selectedMeter.meter,
                     nickname,
                     meterNumber,
                     consumerNumber,
                     freeUnits,
+                    customFields,
                 )
             },
             paymentMethods = paymentMethods,
-            onAddReading = { value, date, billed, payment ->
-                viewModel.addReading(selectedMeter.meter, value, date, billed, payment)
+            onAddReading = { value, date, billed, payment, customValues ->
+                viewModel.addReading(
+                    selectedMeter.meter,
+                    value,
+                    date,
+                    billed,
+                    payment,
+                    customValues,
+                )
             },
-            onUpdateReading = { reading, value, date, billed, payment ->
-                viewModel.updateReading(selectedMeter.meter, reading, value, date, billed, payment)
+            onUpdateReading = { reading, value, date, billed, payment, customValues ->
+                viewModel.updateReading(
+                    selectedMeter.meter,
+                    reading,
+                    value,
+                    date,
+                    billed,
+                    payment,
+                    customValues,
+                )
             },
         )
     } else {
@@ -1511,7 +1531,7 @@ private fun AddMeterSheet(
 private fun MeterSettingsDialog(
     meter: MeterEntity,
     onDismiss: () -> Unit,
-    onSave: (String, String, String?, Double?) -> Unit,
+    onSave: (String, String, String?, Double?, List<CustomFieldDefinition>) -> Unit,
 ) {
     var nickname by rememberSaveable(meter.id) { mutableStateOf(meter.nickname) }
     var meterNumber by rememberSaveable(meter.id) { mutableStateOf(meter.meterNumber) }
@@ -1521,10 +1541,30 @@ private fun MeterSettingsDialog(
     var freeUnits by rememberSaveable(meter.id) {
         mutableStateOf(meter.freeUnits?.let(::formatUnit).orEmpty())
     }
+    var customFields by remember(meter.id, meter.customFields) {
+        mutableStateOf(meter.customFields)
+    }
+    var newCustomFieldName by rememberSaveable(meter.id) { mutableStateOf("") }
+    var pendingCustomFieldId by rememberSaveable(meter.id) {
+        mutableStateOf(UUID.randomUUID().toString())
+    }
     var attempted by rememberSaveable { mutableStateOf(false) }
     val parsedFreeUnits = freeUnits.toDoubleOrNull()
+    val trimmedNewFieldName = newCustomFieldName.trim()
+    val newFieldIsDuplicate = customFields.any {
+        it.name.equals(trimmedNewFieldName, ignoreCase = true)
+    }
+    val fieldsToSave = if (trimmedNewFieldName.isEmpty()) {
+        customFields
+    } else {
+        customFields + CustomFieldDefinition(pendingCustomFieldId, trimmedNewFieldName)
+    }
+    val customFieldsValid = fieldsToSave.size <= 50 &&
+        fieldsToSave.all { it.name.isNotBlank() && it.name.length <= 60 } &&
+        fieldsToSave.distinctBy { it.name.trim().lowercase() }.size == fieldsToSave.size
     val valid = nickname.isNotBlank() &&
         meterNumber.isNotBlank() &&
+        customFieldsValid &&
         (
             meter.type != MeterType.ELECTRICITY ||
                 freeUnits.isBlank() ||
@@ -1535,7 +1575,10 @@ private fun MeterSettingsDialog(
         onDismissRequest = onDismiss,
         title = { Text("Meter settings") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 Text(
                     meter.type.displayName(),
                     color = MaterialTheme.colorScheme.primary,
@@ -1577,6 +1620,66 @@ private fun MeterSettingsDialog(
                             (parsedFreeUnits == null || parsedFreeUnits <= 0),
                     )
                 }
+                HorizontalDivider()
+                Text("Custom columns", fontWeight = FontWeight.SemiBold)
+                Text(
+                    "These columns belong only to this meter and remain available for all future readings.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                customFields.forEachIndexed { index, field ->
+                    OutlinedTextField(
+                        value = field.name,
+                        onValueChange = { name ->
+                            customFields = customFields.toMutableList().also {
+                                it[index] = field.copy(name = name)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Column ${index + 1}") },
+                        supportingText = { Text("The label can change; the column cannot be removed.") },
+                        singleLine = true,
+                        isError = attempted && (
+                            field.name.isBlank() ||
+                                field.name.length > 60 ||
+                                customFields.count {
+                                    it.name.trim().equals(field.name.trim(), ignoreCase = true)
+                                } > 1
+                            ),
+                    )
+                }
+                OutlinedTextField(
+                    value = newCustomFieldName,
+                    onValueChange = { newCustomFieldName = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Add a custom column") },
+                    placeholder = { Text("EMI") },
+                    supportingText = {
+                        Text(
+                            when {
+                                trimmedNewFieldName.length > 60 -> "Use 60 characters or fewer."
+                                newFieldIsDuplicate -> "A column with this name already exists."
+                                else -> "Values are optional on each reading."
+                            },
+                        )
+                    },
+                    singleLine = true,
+                    isError = trimmedNewFieldName.length > 60 || newFieldIsDuplicate,
+                )
+                OutlinedButton(
+                    onClick = {
+                        customFields = fieldsToSave
+                        newCustomFieldName = ""
+                        pendingCustomFieldId = UUID.randomUUID().toString()
+                    },
+                    enabled = trimmedNewFieldName.isNotEmpty() &&
+                        trimmedNewFieldName.length <= 60 &&
+                        !newFieldIsDuplicate &&
+                        customFields.size < 50,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("Add column")
+                }
             }
         },
         confirmButton = {
@@ -1592,6 +1695,7 @@ private fun MeterSettingsDialog(
                         } else {
                             null
                         },
+                        fieldsToSave,
                     )
                 }
             }) {
@@ -1612,10 +1716,17 @@ private fun MeterDetailScreen(
     onBack: () -> Unit,
     onDeleteReading: (ReadingEntity) -> Unit,
     onReset: (ReadingEntity) -> Unit,
-    onUpdateMeter: (String, String, String?, Double?) -> Unit,
+    onUpdateMeter: (String, String, String?, Double?, List<CustomFieldDefinition>) -> Unit,
     paymentMethods: List<PaymentMethodEntity>,
-    onAddReading: (Double, Long, Boolean, PaymentInput?) -> Unit,
-    onUpdateReading: (ReadingEntity, Double, Long, Boolean, PaymentInput?) -> Unit,
+    onAddReading: (Double, Long, Boolean, PaymentInput?, Map<String, String>) -> Unit,
+    onUpdateReading: (
+        ReadingEntity,
+        Double,
+        Long,
+        Boolean,
+        PaymentInput?,
+        Map<String, String>,
+    ) -> Unit,
 ) {
     var showAddReading by rememberSaveable { mutableStateOf(false) }
     var editingReading by remember { mutableStateOf<ReadingEntity?>(null) }
@@ -1708,6 +1819,7 @@ private fun MeterDetailScreen(
                 items(item.sortedReadings, key = { it.id }) { reading ->
                     ReadingRow(
                         reading = reading,
+                        customFields = item.meter.customFields,
                         payment = item.paymentFor(reading),
                         dailyConsumption = item.dailyConsumptionFor(reading),
                         onEdit = { editingReading = reading },
@@ -1722,10 +1834,11 @@ private fun MeterDetailScreen(
     if (showAddReading) {
         ReadingDialog(
             latestValue = item.latestReading?.value,
+            customFields = item.meter.customFields,
             paymentMethods = paymentMethods,
             onDismiss = { showAddReading = false },
-            onSave = { value, date, billed, payment ->
-                onAddReading(value, date, billed, payment)
+            onSave = { value, date, billed, payment, customValues ->
+                onAddReading(value, date, billed, payment, customValues)
                 showAddReading = false
             },
         )
@@ -1734,13 +1847,14 @@ private fun MeterDetailScreen(
         ReadingDialog(
             reading = reading,
             payment = item.paymentFor(reading),
+            customFields = item.meter.customFields,
             latestValue = item.latestReading
                 ?.takeUnless { it.id == reading.id }
                 ?.value,
             paymentMethods = paymentMethods,
             onDismiss = { editingReading = null },
-            onSave = { value, date, billed, payment ->
-                onUpdateReading(reading, value, date, billed, payment)
+            onSave = { value, date, billed, payment, customValues ->
+                onUpdateReading(reading, value, date, billed, payment, customValues)
                 editingReading = null
             },
         )
@@ -1778,8 +1892,8 @@ private fun MeterDetailScreen(
         MeterSettingsDialog(
             meter = item.meter,
             onDismiss = { showMeterSettings = false },
-            onSave = { nickname, meterNumber, consumerNumber, freeUnits ->
-                onUpdateMeter(nickname, meterNumber, consumerNumber, freeUnits)
+            onSave = { nickname, meterNumber, consumerNumber, freeUnits, customFields ->
+                onUpdateMeter(nickname, meterNumber, consumerNumber, freeUnits, customFields)
                 showMeterSettings = false
             },
         )
@@ -2026,6 +2140,7 @@ private fun MiniLineChart(
 @Composable
 private fun ReadingRow(
     reading: ReadingEntity,
+    customFields: List<CustomFieldDefinition>,
     payment: PaymentRecordEntity?,
     dailyConsumption: com.meterx.app.data.DailyConsumption?,
     onEdit: () -> Unit,
@@ -2060,6 +2175,15 @@ private fun ReadingRow(
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.Medium,
                     )
+                }
+                customFields.forEach { field ->
+                    reading.customValues[field.id]?.let { value ->
+                        Text(
+                            "${field.name}: $value",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
                 }
             }
             if (reading.isBilled) {
@@ -2111,9 +2235,10 @@ private fun ReadingDialog(
     reading: ReadingEntity? = null,
     payment: PaymentRecordEntity? = null,
     latestValue: Double?,
+    customFields: List<CustomFieldDefinition>,
     paymentMethods: List<PaymentMethodEntity>,
     onDismiss: () -> Unit,
-    onSave: (Double, Long, Boolean, PaymentInput?) -> Unit,
+    onSave: (Double, Long, Boolean, PaymentInput?, Map<String, String>) -> Unit,
 ) {
     val methodOptions = paymentMethodNames(paymentMethods, payment?.methodName)
     var value by rememberSaveable(reading?.id) {
@@ -2134,6 +2259,13 @@ private fun ReadingDialog(
     var selectedMethod by rememberSaveable(reading?.id) {
         mutableStateOf(payment?.methodName ?: methodOptions.first())
     }
+    var customValues by remember(reading?.id, customFields) {
+        mutableStateOf(
+            customFields.associate { field ->
+                field.id to reading?.customValues?.get(field.id).orEmpty()
+            },
+        )
+    }
     var showDatePicker by rememberSaveable { mutableStateOf(false) }
     var showPaymentDatePicker by rememberSaveable { mutableStateOf(false) }
     var methodExpanded by rememberSaveable { mutableStateOf(false) }
@@ -2142,13 +2274,17 @@ private fun ReadingDialog(
     val parsedPaymentAmount = paymentAmount.toDoubleOrNull()
     val paymentValid = !billed ||
         (parsedPaymentAmount != null && parsedPaymentAmount > 0 && selectedMethod.isNotBlank())
-    val valid = parsedValue != null && parsedValue >= 0 && paymentValid
+    val customValuesValid = customValues.values.all { it.trim().length <= 240 }
+    val valid = parsedValue != null && parsedValue >= 0 && paymentValid && customValuesValid
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (reading == null) "Add meter reading" else "Edit meter reading") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
                 OutlinedTextField(
                     value = value,
                     onValueChange = { value = it.filterDecimal() },
@@ -2167,6 +2303,28 @@ private fun ReadingDialog(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(formatDate(selectedDate))
+                }
+                if (customFields.isNotEmpty()) {
+                    HorizontalDivider()
+                    Text("Custom columns", fontWeight = FontWeight.SemiBold)
+                    customFields.forEach { field ->
+                        val fieldValue = customValues[field.id].orEmpty()
+                        OutlinedTextField(
+                            value = fieldValue,
+                            onValueChange = { value ->
+                                customValues = customValues + (field.id to value)
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("${field.name} (optional)") },
+                            supportingText = if (fieldValue.trim().length > 240) {
+                                { Text("Use 240 characters or fewer.") }
+                            } else {
+                                null
+                            },
+                            isError = fieldValue.trim().length > 240,
+                            singleLine = true,
+                        )
+                    }
                 }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -2256,7 +2414,13 @@ private fun ReadingDialog(
                     } else {
                         null
                     }
-                    onSave(parsedValue!!, selectedDate, billed, paymentInput)
+                    onSave(
+                        parsedValue!!,
+                        selectedDate,
+                        billed,
+                        paymentInput,
+                        customValues,
+                    )
                 }
             }) { Text(if (reading == null) "Add reading" else "Save changes") }
         },

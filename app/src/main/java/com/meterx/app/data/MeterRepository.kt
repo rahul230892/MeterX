@@ -46,6 +46,7 @@ class MeterRepository(
         meterNumber: String,
         consumerNumber: String?,
         freeUnits: Double?,
+        customFields: List<CustomFieldDefinition>,
     ) {
         dao.updateMeter(
             meter.copy(
@@ -53,6 +54,7 @@ class MeterRepository(
                 meterNumber = meterNumber.trim(),
                 consumerNumber = consumerNumber?.trim()?.takeIf(String::isNotEmpty),
                 freeUnits = freeUnits.takeIf { meter.type == MeterType.ELECTRICITY },
+                customFields = mergeCustomFields(meter.customFields, customFields),
             ),
         )
         syncBackup()
@@ -64,6 +66,7 @@ class MeterRepository(
         date: Long,
         isBilled: Boolean,
         payment: PaymentInput?,
+        customValues: Map<String, String>,
     ) {
         database.withTransaction {
             val readingId = dao.insertReading(
@@ -72,6 +75,7 @@ class MeterRepository(
                     value = value,
                     readingDate = date,
                     isBilled = isBilled,
+                    customValues = normalizeCustomValues(meter.customFields, customValues),
                 ),
             )
             if (isBilled && payment != null) {
@@ -99,6 +103,7 @@ class MeterRepository(
         date: Long,
         isBilled: Boolean,
         payment: PaymentInput?,
+        customValues: Map<String, String>,
     ) {
         database.withTransaction {
             dao.updateReading(
@@ -106,6 +111,7 @@ class MeterRepository(
                     value = value,
                     readingDate = date,
                     isBilled = isBilled,
+                    customValues = normalizeCustomValues(meter.customFields, customValues),
                 ),
             )
             if (isBilled && payment != null) {
@@ -280,6 +286,7 @@ class MeterRepository(
                         consumerNumber = meter.consumerNumber,
                         freeUnits = meter.freeUnits,
                         cycleBaseline = meter.cycleBaseline,
+                        customFields = meter.customFields,
                         createdAt = meter.createdAt,
                     ),
                 )
@@ -293,6 +300,7 @@ class MeterRepository(
                         value = reading.value,
                         readingDate = reading.readingDate,
                         isBilled = reading.isBilled,
+                        customValues = reading.customValues,
                         createdAt = reading.createdAt,
                     ),
                 )
@@ -332,4 +340,50 @@ class MeterRepository(
             methodName = methodName.trim(),
             createdAt = existing?.createdAt ?: System.currentTimeMillis(),
         )
+
+    private fun mergeCustomFields(
+        existing: List<CustomFieldDefinition>,
+        submitted: List<CustomFieldDefinition>,
+    ): List<CustomFieldDefinition> {
+        val submittedById = submitted.associateBy(CustomFieldDefinition::id)
+        val existingIds = existing.mapTo(mutableSetOf(), CustomFieldDefinition::id)
+        val merged = existing.map { field ->
+            submittedById[field.id]?.let { field.copy(name = it.name.trim()) } ?: field
+        } + submitted.filterNot { it.id in existingIds }.map { it.copy(name = it.name.trim()) }
+
+        require(merged.size <= MAX_CUSTOM_FIELDS) {
+            "A meter can have up to $MAX_CUSTOM_FIELDS custom columns."
+        }
+        require(merged.all { it.id.isNotBlank() && it.name.isNotBlank() }) {
+            "Custom column names are required."
+        }
+        require(merged.all { it.id.length <= 80 && it.name.length <= 60 }) {
+            "Custom column names can contain up to 60 characters."
+        }
+        require(merged.distinctBy { it.id }.size == merged.size) {
+            "Custom column IDs must be unique."
+        }
+        require(merged.distinctBy { it.name.lowercase() }.size == merged.size) {
+            "Custom column names must be unique for this meter."
+        }
+        return merged
+    }
+
+    private fun normalizeCustomValues(
+        definitions: List<CustomFieldDefinition>,
+        submitted: Map<String, String>,
+    ): Map<String, String> = buildMap {
+        definitions.forEach { field ->
+            val value = submitted[field.id]?.trim()?.takeIf(String::isNotEmpty)
+                ?: return@forEach
+            require(value.length <= 240) {
+                "Custom column values can contain up to 240 characters."
+            }
+            put(field.id, value)
+        }
+    }
+
+    private companion object {
+        const val MAX_CUSTOM_FIELDS = 50
+    }
 }

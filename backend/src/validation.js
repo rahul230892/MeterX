@@ -10,6 +10,16 @@ export const changePasswordSchema = z.object({
   newPassword: z.string().min(8).max(128),
 });
 
+const customFieldSchema = z.object({
+  id: z.string().trim().min(1).max(80),
+  name: z.string().trim().min(1).max(60),
+});
+
+const customValueSchema = z.object({
+  fieldId: z.string().trim().min(1).max(80),
+  value: z.string().trim().min(1).max(240),
+});
+
 export const meterSchema = z
   .object({
     clientId: z.union([z.string(), z.number()]).transform(String),
@@ -19,6 +29,7 @@ export const meterSchema = z
     consumerNumber: z.string().trim().max(120).nullable().optional(),
     freeUnits: z.number().positive().nullable().optional(),
     cycleBaseline: z.number().nonnegative().nullable().optional(),
+    customFields: z.array(customFieldSchema).max(50).default([]),
     createdAt: z.number().int().nonnegative(),
   })
   .superRefine((meter, context) => {
@@ -29,6 +40,27 @@ export const meterSchema = z
         message: "Electricity meters require freeUnits.",
       });
     }
+    const fieldIds = new Set();
+    const fieldNames = new Set();
+    meter.customFields.forEach((field, index) => {
+      const normalizedName = field.name.toLowerCase();
+      if (fieldIds.has(field.id)) {
+        context.addIssue({
+          code: "custom",
+          path: ["customFields", index, "id"],
+          message: "Duplicate custom column ID.",
+        });
+      }
+      if (fieldNames.has(normalizedName)) {
+        context.addIssue({
+          code: "custom",
+          path: ["customFields", index, "name"],
+          message: "Duplicate custom column name.",
+        });
+      }
+      fieldIds.add(field.id);
+      fieldNames.add(normalizedName);
+    });
   });
 
 export const readingSchema = z.object({
@@ -37,7 +69,20 @@ export const readingSchema = z.object({
   value: z.number().nonnegative(),
   readingDate: z.number().int(),
   isBilled: z.boolean().default(false),
+  customValues: z.array(customValueSchema).max(50).default([]),
   createdAt: z.number().int().nonnegative(),
+}).superRefine((reading, context) => {
+  const fieldIds = new Set();
+  reading.customValues.forEach((entry, index) => {
+    if (fieldIds.has(entry.fieldId)) {
+      context.addIssue({
+        code: "custom",
+        path: ["customValues", index, "fieldId"],
+        message: "Duplicate custom column value.",
+      });
+    }
+    fieldIds.add(entry.fieldId);
+  });
 });
 
 export const paymentMethodSchema = z.object({
@@ -65,6 +110,12 @@ export const snapshotSchema = z
   })
   .superRefine((snapshot, context) => {
     const meterIds = new Set(snapshot.meters.map((meter) => meter.clientId));
+    const customFieldIdsByMeter = new Map(
+      snapshot.meters.map((meter) => [
+        meter.clientId,
+        new Set(meter.customFields.map((field) => field.id)),
+      ]),
+    );
     const billedReadingIds = new Set(
       snapshot.readings
         .filter((reading) => reading.isBilled)
@@ -103,6 +154,16 @@ export const snapshotSchema = z
         });
       }
       uniqueReadingIds.add(reading.clientId);
+      const customFieldIds = customFieldIdsByMeter.get(reading.meterClientId);
+      reading.customValues.forEach((entry, valueIndex) => {
+        if (!customFieldIds?.has(entry.fieldId)) {
+          context.addIssue({
+            code: "custom",
+            path: ["readings", index, "customValues", valueIndex, "fieldId"],
+            message: "Custom value references a column not defined for this meter.",
+          });
+        }
+      });
     });
 
     snapshot.paymentMethods.forEach((method, index) => {

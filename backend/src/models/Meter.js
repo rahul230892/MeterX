@@ -1,5 +1,23 @@
 import mongoose from "mongoose";
 
+const customFieldSchema = new mongoose.Schema(
+  {
+    id: {
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 80,
+    },
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 60,
+    },
+  },
+  { _id: false },
+);
+
 const meterSchema = new mongoose.Schema(
   {
     ownerId: {
@@ -45,6 +63,10 @@ const meterSchema = new mongoose.Schema(
       type: Number,
       min: 0,
       default: null,
+    },
+    customFields: {
+      type: [customFieldSchema],
+      default: [],
     },
     clientCreatedAt: {
       type: Number,

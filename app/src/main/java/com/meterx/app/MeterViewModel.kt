@@ -9,6 +9,7 @@ import com.meterx.app.data.AppUpdateInfo
 import com.meterx.app.data.AuthSession
 import com.meterx.app.data.AuthExpiredException
 import com.meterx.app.data.AuthUser
+import com.meterx.app.data.CustomFieldDefinition
 import com.meterx.app.data.ImportPreview
 import com.meterx.app.data.MeterEntity
 import com.meterx.app.data.MeterRepository
@@ -194,9 +195,17 @@ class MeterViewModel(
         meterNumber: String,
         consumerNumber: String?,
         freeUnits: Double?,
+        customFields: List<CustomFieldDefinition>,
     ) = viewModelScope.launch {
         syncOperation {
-            repository.updateMeter(meter, nickname, meterNumber, consumerNumber, freeUnits)
+            repository.updateMeter(
+                meter,
+                nickname,
+                meterNumber,
+                consumerNumber,
+                freeUnits,
+                customFields,
+            )
         }
     }
 
@@ -206,9 +215,12 @@ class MeterViewModel(
         date: Long,
         isBilled: Boolean,
         payment: PaymentInput?,
+        customValues: Map<String, String>,
     ) =
         viewModelScope.launch {
-            syncOperation { repository.addReading(meter, value, date, isBilled, payment) }
+            syncOperation {
+                repository.addReading(meter, value, date, isBilled, payment, customValues)
+            }
         }
 
     fun deleteReading(reading: ReadingEntity) = viewModelScope.launch {
@@ -222,9 +234,18 @@ class MeterViewModel(
         date: Long,
         isBilled: Boolean,
         payment: PaymentInput?,
+        customValues: Map<String, String>,
     ) = viewModelScope.launch {
         syncOperation {
-            repository.updateReading(meter, reading, value, date, isBilled, payment)
+            repository.updateReading(
+                meter,
+                reading,
+                value,
+                date,
+                isBilled,
+                payment,
+                customValues,
+            )
         }
     }
 

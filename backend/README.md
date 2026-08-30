@@ -105,6 +105,8 @@ This verifies the current password and returns a fresh JWT.
 Android Room IDs are sent as `clientId` strings. This lets existing local data
 upload without changing generated local IDs. Payment methods and payment records
 are stored as separate cloud collections and included in the full sync snapshot.
+Custom column definitions are embedded in their meter, while optional values are
+embedded in each reading and validated against that reading's meter.
 
 ### Snapshot example
 
@@ -119,6 +121,9 @@ are stored as separate cloud collections and included in the full sync snapshot.
       "consumerNumber": null,
       "freeUnits": 200,
       "cycleBaseline": 1450,
+      "customFields": [
+        { "id": "emi", "name": "EMI" }
+      ],
       "createdAt": 1710000000000
     }
   ],
@@ -129,6 +134,9 @@ are stored as separate cloud collections and included in the full sync snapshot.
       "value": 1482,
       "readingDate": 20500,
       "isBilled": true,
+      "customValues": [
+        { "fieldId": "emi", "value": "1500" }
+      ],
       "createdAt": 1710000000000
     }
   ],

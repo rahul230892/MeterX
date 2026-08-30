@@ -8,9 +8,9 @@ const config = {
   JWT_SECRET: "test-secret-that-is-at-least-thirty-two-characters",
   JWT_EXPIRES_IN: "1h",
   CORS_ORIGIN: "*",
-  APP_LATEST_VERSION_CODE: 8,
-  APP_LATEST_VERSION_NAME: "1.7",
-  APP_MIN_SUPPORTED_VERSION_CODE: 8,
+  APP_LATEST_VERSION_CODE: 9,
+  APP_LATEST_VERSION_NAME: "1.8",
+  APP_MIN_SUPPORTED_VERSION_CODE: 9,
   APP_APK_URL: "https://example.com/meterx.apk",
   APP_RELEASE_NOTES: "Test update.",
 };
@@ -36,9 +36,9 @@ test("app update endpoint reports latest version", async () => {
   const response = await request(createApp(config)).get("/api/app/latest");
 
   assert.equal(response.status, 200);
-  assert.equal(response.body.latestVersionCode, 8);
-  assert.equal(response.body.latestVersionName, "1.7");
-  assert.equal(response.body.minSupportedVersionCode, 8);
+  assert.equal(response.body.latestVersionCode, 9);
+  assert.equal(response.body.latestVersionName, "1.8");
+  assert.equal(response.body.minSupportedVersionCode, 9);
   assert.equal(response.body.apkUrl, "https://example.com/meterx.apk");
   assert.equal(response.body.forceUpdate, true);
 });
@@ -54,6 +54,9 @@ test("snapshot validation accepts MeterX Android data", () => {
         consumerNumber: null,
         freeUnits: 200,
         cycleBaseline: 1000,
+        customFields: [
+          { id: "emi", name: "EMI" },
+        ],
         createdAt: 1710000000000,
       },
     ],
@@ -64,6 +67,9 @@ test("snapshot validation accepts MeterX Android data", () => {
         value: 1025,
         readingDate: 20500,
         isBilled: true,
+        customValues: [
+          { fieldId: "emi", value: "1500" },
+        ],
         createdAt: 1710000000000,
       },
     ],
@@ -88,7 +94,9 @@ test("snapshot validation accepts MeterX Android data", () => {
   });
 
   assert.equal(snapshot.meters[0].clientId, "1");
+  assert.equal(snapshot.meters[0].customFields[0].name, "EMI");
   assert.equal(snapshot.readings[0].meterClientId, "1");
+  assert.equal(snapshot.readings[0].customValues[0].value, "1500");
   assert.equal(snapshot.paymentMethods[0].clientId, "20");
   assert.equal(snapshot.payments[0].readingClientId, "10");
 });
@@ -143,6 +151,48 @@ test("snapshot validation rejects payments for unbilled readings", () => {
         amount: 1250,
         paymentDate: 20502,
         methodName: "Amazon Pay",
+        createdAt: 1710000000000,
+      },
+    ],
+  });
+
+  assert.equal(result.success, false);
+});
+
+test("snapshot validation keeps custom columns scoped to their meter", () => {
+  const result = snapshotSchema.safeParse({
+    meters: [
+      {
+        clientId: "1",
+        nickname: "Gas",
+        type: "GAS",
+        meterNumber: "G-1",
+        consumerNumber: null,
+        freeUnits: null,
+        cycleBaseline: null,
+        customFields: [],
+        createdAt: 1710000000000,
+      },
+      {
+        clientId: "2",
+        nickname: "Loan meter",
+        type: "WATER",
+        meterNumber: "W-1",
+        consumerNumber: null,
+        freeUnits: null,
+        cycleBaseline: null,
+        customFields: [{ id: "emi", name: "EMI" }],
+        createdAt: 1710000000001,
+      },
+    ],
+    readings: [
+      {
+        clientId: "10",
+        meterClientId: "1",
+        value: 10,
+        readingDate: 20500,
+        isBilled: false,
+        customValues: [{ fieldId: "emi", value: "1500" }],
         createdAt: 1710000000000,
       },
     ],

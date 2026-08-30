@@ -14,6 +14,11 @@ enum class MeterType {
     GAS,
 }
 
+data class CustomFieldDefinition(
+    val id: String,
+    val name: String,
+)
+
 @Entity(tableName = "meters")
 data class MeterEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -23,6 +28,8 @@ data class MeterEntity(
     @ColumnInfo(name = "consumer_number") val consumerNumber: String?,
     @ColumnInfo(name = "free_units") val freeUnits: Double?,
     @ColumnInfo(name = "cycle_baseline") val cycleBaseline: Double?,
+    @ColumnInfo(name = "custom_fields_json", defaultValue = "'[]'")
+    val customFields: List<CustomFieldDefinition> = emptyList(),
     @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis(),
 )
 
@@ -44,6 +51,8 @@ data class ReadingEntity(
     val value: Double,
     @ColumnInfo(name = "reading_date") val readingDate: Long,
     @ColumnInfo(name = "is_billed") val isBilled: Boolean = false,
+    @ColumnInfo(name = "custom_values_json", defaultValue = "'{}'")
+    val customValues: Map<String, String> = emptyMap(),
     @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis(),
 )
 

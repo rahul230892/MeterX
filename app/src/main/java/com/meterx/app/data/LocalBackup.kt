@@ -83,12 +83,21 @@ class LocalBackup(private val context: Context) {
         meters.forEach { item ->
             val readings = JSONArray()
             item.sortedReadings.forEach { reading ->
+                val customValues = JSONArray()
+                reading.customValues.toSortedMap().forEach { (fieldId, value) ->
+                    customValues.put(
+                        JSONObject()
+                            .put("fieldId", fieldId)
+                            .put("value", value),
+                    )
+                }
                 readings.put(
                     JSONObject()
                         .put("id", reading.id)
                         .put("value", reading.value)
                         .put("date", reading.readingDate)
                         .put("isBilled", reading.isBilled)
+                        .put("customValues", customValues)
                         .put("createdAt", reading.createdAt),
                 )
             }
@@ -106,6 +115,15 @@ class LocalBackup(private val context: Context) {
                 )
             }
 
+            val customFields = JSONArray()
+            item.meter.customFields.forEach { field ->
+                customFields.put(
+                    JSONObject()
+                        .put("id", field.id)
+                        .put("name", field.name),
+                )
+            }
+
             meterArray.put(
                 JSONObject()
                     .put("id", item.meter.id)
@@ -115,6 +133,7 @@ class LocalBackup(private val context: Context) {
                     .put("consumerNumber", item.meter.consumerNumber ?: JSONObject.NULL)
                     .put("freeUnits", item.meter.freeUnits ?: JSONObject.NULL)
                     .put("cycleBaseline", item.meter.cycleBaseline ?: JSONObject.NULL)
+                    .put("customFields", customFields)
                     .put("createdAt", item.meter.createdAt)
                     .put("readings", readings)
                     .put("payments", payments),
@@ -123,7 +142,7 @@ class LocalBackup(private val context: Context) {
 
         return JSONObject()
             .put("format", "meterx-backup")
-            .put("version", 2)
+            .put("version", 3)
             .put("exportedAt", System.currentTimeMillis())
             .put("paymentMethods", methodArray)
             .put("meters", meterArray)
@@ -137,7 +156,7 @@ class LocalBackup(private val context: Context) {
             error("This is not a valid MeterX data file.")
         }
         val version = root.optInt("version", -1)
-        require(version == 1 || version == 2) {
+        require(version in 1..3) {
             "This MeterX data file version is not supported."
         }
         val meterArray = root.optJSONArray("meters")
@@ -185,6 +204,30 @@ class LocalBackup(private val context: Context) {
             require(type != MeterType.ELECTRICITY || (freeUnits != null && freeUnits > 0)) {
                 "An electricity meter has invalid free units."
             }
+            val customFields = mutableListOf<CustomFieldDefinition>()
+            val customFieldIds = mutableSetOf<String>()
+            val customFieldNames = mutableSetOf<String>()
+            val customFieldArray = json.optJSONArray("customFields") ?: JSONArray()
+            require(customFieldArray.length() <= 50) {
+                "A meter has too many custom columns."
+            }
+            repeat(customFieldArray.length()) { fieldIndex ->
+                val field = customFieldArray.optJSONObject(fieldIndex)
+                    ?: error("A custom column definition is invalid.")
+                val fieldId = field.optString("id").trim()
+                val fieldName = field.optString("name").trim()
+                require(
+                    fieldId.isNotEmpty() &&
+                        fieldId.length <= 80 &&
+                        customFieldIds.add(fieldId) &&
+                        fieldName.isNotEmpty() &&
+                        fieldName.length <= 60 &&
+                        customFieldNames.add(fieldName.lowercase()),
+                ) {
+                    "A custom column definition is incomplete or duplicated."
+                }
+                customFields += CustomFieldDefinition(fieldId, fieldName)
+            }
             meters += MeterEntity(
                 id = id,
                 nickname = nickname,
@@ -193,6 +236,7 @@ class LocalBackup(private val context: Context) {
                 consumerNumber = json.nullableString("consumerNumber"),
                 freeUnits = freeUnits.takeIf { type == MeterType.ELECTRICITY },
                 cycleBaseline = json.nullableDouble("cycleBaseline"),
+                customFields = customFields,
                 createdAt = json.optLong("createdAt", System.currentTimeMillis()),
             )
 
@@ -205,12 +249,29 @@ class LocalBackup(private val context: Context) {
                 require(readingId > 0 && readingIds.add(readingId) && value.isFinite() && value >= 0) {
                     "A reading record is incomplete or duplicated."
                 }
+                val customValues = mutableMapOf<String, String>()
+                val customValueArray = reading.optJSONArray("customValues") ?: JSONArray()
+                repeat(customValueArray.length()) { valueIndex ->
+                    val customValue = customValueArray.optJSONObject(valueIndex)
+                        ?: error("A custom column value is invalid.")
+                    val fieldId = customValue.optString("fieldId").trim()
+                    val fieldValue = customValue.optString("value").trim()
+                    require(
+                        fieldId in customFieldIds &&
+                            fieldValue.isNotEmpty() &&
+                            fieldValue.length <= 240 &&
+                            customValues.put(fieldId, fieldValue) == null,
+                    ) {
+                        "A custom column value is incomplete or duplicated."
+                    }
+                }
                 readings += ReadingEntity(
                     id = readingId,
                     meterId = id,
                     value = value,
                     readingDate = reading.getLong("date"),
                     isBilled = reading.optBoolean("isBilled", false),
+                    customValues = customValues,
                     createdAt = reading.optLong("createdAt", System.currentTimeMillis()),
                 )
             }

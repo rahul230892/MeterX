@@ -27,12 +27,20 @@ export function createReadingRouter() {
         ...request.body,
         clientId: request.params.clientId,
       });
-      const meterExists = await Meter.exists({
+      const meter = await Meter.findOne({
         ownerId: request.user.id,
         clientId: reading.meterClientId,
-      });
-      if (!meterExists) {
+      }).lean();
+      if (!meter) {
         return response.status(400).json({ error: "Referenced meter does not exist." });
+      }
+      const customFieldIds = new Set(
+        (meter.customFields ?? []).map((field) => field.id),
+      );
+      if (reading.customValues.some((entry) => !customFieldIds.has(entry.fieldId))) {
+        return response.status(400).json({
+          error: "A custom value references a column that is not defined for this meter.",
+        });
       }
       const saved = await Reading.findOneAndUpdate(
         { ownerId: request.user.id, clientId: reading.clientId },
@@ -71,6 +79,7 @@ export function toReadingDocument(ownerId, reading) {
     value: reading.value,
     readingDate: reading.readingDate,
     isBilled: reading.isBilled,
+    customValues: reading.customValues,
     clientCreatedAt: reading.createdAt,
   };
 }
@@ -82,6 +91,7 @@ export function toReadingResponse(reading) {
     value: reading.value,
     readingDate: reading.readingDate,
     isBilled: reading.isBilled,
+    customValues: reading.customValues ?? [],
     createdAt: reading.clientCreatedAt,
     updatedAt: reading.updatedAt,
   };

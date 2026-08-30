@@ -1,5 +1,23 @@
 import mongoose from "mongoose";
 
+const customValueSchema = new mongoose.Schema(
+  {
+    fieldId: {
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 80,
+    },
+    value: {
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 240,
+    },
+  },
+  { _id: false },
+);
+
 const readingSchema = new mongoose.Schema(
   {
     ownerId: {
@@ -30,6 +48,10 @@ const readingSchema = new mongoose.Schema(
     isBilled: {
       type: Boolean,
       default: false,
+    },
+    customValues: {
+      type: [customValueSchema],
+      default: [],
     },
     clientCreatedAt: {
       type: Number,

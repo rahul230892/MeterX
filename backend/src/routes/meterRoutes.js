@@ -67,6 +67,7 @@ export function toMeterDocument(ownerId, meter) {
     consumerNumber: meter.consumerNumber || null,
     freeUnits: meter.type === "ELECTRICITY" ? meter.freeUnits : null,
     cycleBaseline: meter.cycleBaseline ?? null,
+    customFields: meter.customFields,
     clientCreatedAt: meter.createdAt,
   };
 }
@@ -80,6 +81,7 @@ export function toMeterResponse(meter) {
     consumerNumber: meter.consumerNumber,
     freeUnits: meter.freeUnits,
     cycleBaseline: meter.cycleBaseline,
+    customFields: meter.customFields ?? [],
     createdAt: meter.clientCreatedAt,
     updatedAt: meter.updatedAt,
   };

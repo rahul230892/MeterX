@@ -27,6 +27,7 @@ data class CloudMeter(
     val consumerNumber: String?,
     val freeUnits: Double?,
     val cycleBaseline: Double?,
+    val customFields: List<CustomFieldDefinition>,
     val createdAt: Long,
 )
 
@@ -36,6 +37,7 @@ data class CloudReading(
     val value: Double,
     val readingDate: Long,
     val isBilled: Boolean,
+    val customValues: Map<String, String>,
     val createdAt: Long,
 )
 
@@ -145,6 +147,7 @@ class MeterApi(baseUrl: String) {
                         .putNullable("consumerNumber", item.meter.consumerNumber)
                         .putNullable("freeUnits", item.meter.freeUnits)
                         .putNullable("cycleBaseline", item.meter.cycleBaseline)
+                        .put("customFields", item.meter.customFields.toJsonArray())
                         .put("createdAt", item.meter.createdAt),
                 )
                 item.readings.forEach { reading ->
@@ -155,6 +158,7 @@ class MeterApi(baseUrl: String) {
                             .put("value", reading.value)
                             .put("readingDate", reading.readingDate)
                             .put("isBilled", reading.isBilled)
+                            .put("customValues", reading.customValues.toJsonArray())
                             .put("createdAt", reading.createdAt),
                     )
                 }
@@ -271,6 +275,9 @@ private fun JSONArray.toCloudMeters(): List<CloudMeter> = buildList {
                 consumerNumber = item.optNullableString("consumerNumber"),
                 freeUnits = item.optNullableDouble("freeUnits"),
                 cycleBaseline = item.optNullableDouble("cycleBaseline"),
+                customFields = item.optJSONArray("customFields")
+                    ?.toCustomFieldDefinitions()
+                    .orEmpty(),
                 createdAt = item.getLong("createdAt"),
             ),
         )
@@ -287,6 +294,9 @@ private fun JSONArray.toCloudReadings(): List<CloudReading> = buildList {
                 value = item.getDouble("value"),
                 readingDate = item.getLong("readingDate"),
                 isBilled = item.getBoolean("isBilled"),
+                customValues = item.optJSONArray("customValues")
+                    ?.toCustomFieldValues()
+                    .orEmpty(),
                 createdAt = item.getLong("createdAt"),
             ),
         )
@@ -328,3 +338,42 @@ private fun JSONObject.optNullableString(key: String): String? =
 
 private fun JSONObject.optNullableDouble(key: String): Double? =
     if (isNull(key)) null else getDouble(key)
+
+private fun List<CustomFieldDefinition>.toJsonArray(): JSONArray = JSONArray().also { array ->
+    forEach { field ->
+        array.put(
+            JSONObject()
+                .put("id", field.id)
+                .put("name", field.name),
+        )
+    }
+}
+
+private fun Map<String, String>.toJsonArray(): JSONArray = JSONArray().also { array ->
+    toSortedMap().forEach { (fieldId, value) ->
+        array.put(
+            JSONObject()
+                .put("fieldId", fieldId)
+                .put("value", value),
+        )
+    }
+}
+
+private fun JSONArray.toCustomFieldDefinitions(): List<CustomFieldDefinition> = buildList {
+    repeat(length()) { index ->
+        val item = getJSONObject(index)
+        add(
+            CustomFieldDefinition(
+                id = item.getString("id"),
+                name = item.getString("name"),
+            ),
+        )
+    }
+}
+
+private fun JSONArray.toCustomFieldValues(): Map<String, String> = buildMap {
+    repeat(length()) { index ->
+        val item = getJSONObject(index)
+        put(item.getString("fieldId"), item.getString("value"))
+    }
+}

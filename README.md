@@ -15,6 +15,7 @@ MongoDB-backed cloud sync service.
 - Warn near the allowance at 80% and show red at or above 100%.
 - Add dated meter readings and mark a reading as billed.
 - Edit the value, date, or billed status of an existing reading.
+- Add permanent custom columns to an individual meter and optionally fill them on readings.
 - Show interval usage and average units consumed per day for each reading.
 - Enable a daily morning notification at a user-selected reminder time.
 - Start a new free-unit cycle from the latest billed reading.
@@ -26,6 +27,7 @@ MongoDB-backed cloud sync service.
 - Include the database and JSON mirror in Android backup/device transfer.
 - Automatically upload every meter and reading add, edit, delete, reset, and
   import operation to the signed-in user's cloud account.
+- Sync per-meter custom column definitions and their per-reading values.
 - Show an animated cloud icon while syncing, a completion icon when current,
   and a retry state if an upload fails.
 - Keep reminders, data transfer, and account controls together in Settings.

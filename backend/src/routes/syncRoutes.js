@@ -28,7 +28,7 @@ export function createSyncRouter() {
           .lean(),
       ]);
       return response.json({
-        version: 2,
+        version: 3,
         syncedAt: Date.now(),
         meters: meters.map(toMeterResponse),
         readings: readings.map(toReadingResponse),
