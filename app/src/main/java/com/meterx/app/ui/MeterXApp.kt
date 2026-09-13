@@ -47,6 +47,7 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.DirectionsCar
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.FileDownload
 import androidx.compose.material.icons.rounded.FileUpload
@@ -81,6 +82,8 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -130,6 +133,10 @@ import com.meterx.app.data.PaymentMethodEntity
 import com.meterx.app.data.PaymentRecordEntity
 import com.meterx.app.data.ReadingEntity
 import com.meterx.app.data.UsageLevel
+import com.meterx.app.data.VehicleEntity
+import com.meterx.app.data.VehicleRecordEntity
+import com.meterx.app.data.VehicleRecordType
+import com.meterx.app.data.VehicleWithRecords
 import com.meterx.app.data.dailyConsumptionFor
 import com.meterx.app.data.usageStatus
 import java.time.Instant
@@ -141,10 +148,13 @@ import java.util.UUID
 import kotlinx.coroutines.flow.collectLatest
 import kotlin.math.roundToInt
 
+private enum class MainSection { METERS, VEHICLES }
+
 @Composable
 fun MeterXApp(viewModel: MeterViewModel) {
     val authState by viewModel.authState.collectAsStateWithLifecycle()
     val meters by viewModel.meters.collectAsStateWithLifecycle()
+    val vehicles by viewModel.vehicles.collectAsStateWithLifecycle()
     val paymentMethods by viewModel.paymentMethods.collectAsStateWithLifecycle()
     val importPreview by viewModel.importPreview.collectAsStateWithLifecycle()
     val reminderSettings by viewModel.reminderSettings.collectAsStateWithLifecycle()
@@ -154,8 +164,11 @@ fun MeterXApp(viewModel: MeterViewModel) {
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     var selectedMeterId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var selectedVehicleId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var mainSection by rememberSaveable { mutableStateOf(MainSection.METERS) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     val selectedMeter = meters.firstOrNull { it.meter.id == selectedMeterId }
+    val selectedVehicle = vehicles.firstOrNull { it.vehicle.id == selectedVehicleId }
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json"),
     ) { uri ->
@@ -182,6 +195,9 @@ fun MeterXApp(viewModel: MeterViewModel) {
     }
     BackHandler(enabled = !showSettings && selectedMeter != null) {
         selectedMeterId = null
+    }
+    BackHandler(enabled = !showSettings && selectedMeter == null && selectedVehicle != null) {
+        selectedVehicleId = null
     }
 
     if (!authState.initialized || (authState.loading && authState.user != null)) {
@@ -283,7 +299,28 @@ fun MeterXApp(viewModel: MeterViewModel) {
                 )
             },
         )
-    } else {
+    } else if (selectedVehicle != null) {
+        VehicleDetailScreen(
+            item = selectedVehicle,
+            snackbarHostState = snackbarHostState,
+            onBack = { selectedVehicleId = null },
+            onUpdateVehicle = { name, registration, km ->
+                viewModel.updateVehicle(selectedVehicle.vehicle, name, registration, km)
+            },
+            onAddRecord = { type, date, nextDate, amount, km, notes ->
+                viewModel.addVehicleRecord(
+                    selectedVehicle.vehicle,
+                    type,
+                    date,
+                    nextDate,
+                    amount,
+                    km,
+                    notes,
+                )
+            },
+            onDeleteRecord = viewModel::deleteVehicleRecord,
+        )
+    } else if (mainSection == MainSection.METERS) {
         MeterListScreen(
             meters = meters,
             snackbarHostState = snackbarHostState,
@@ -294,6 +331,20 @@ fun MeterXApp(viewModel: MeterViewModel) {
             syncStatus = syncStatus,
             onSync = viewModel::syncNow,
             onOpenSettings = { showSettings = true },
+            onOpenVehicles = { mainSection = MainSection.VEHICLES },
+        )
+    } else {
+        VehicleListScreen(
+            vehicles = vehicles,
+            snackbarHostState = snackbarHostState,
+            onOpenVehicle = { selectedVehicleId = it.vehicle.id },
+            onAddVehicle = viewModel::addVehicle,
+            onDeleteVehicle = viewModel::deleteVehicle,
+            username = authenticatedUser.username,
+            syncStatus = syncStatus,
+            onSync = viewModel::syncNow,
+            onOpenSettings = { showSettings = true },
+            onOpenMeters = { mainSection = MainSection.METERS },
         )
     }
 
@@ -304,7 +355,8 @@ fun MeterXApp(viewModel: MeterViewModel) {
             text = {
                 Text(
                     "This file contains ${preview.meterCount} meters and " +
-                        "${preview.readingCount} readings. Importing will replace all data " +
+                        "${preview.readingCount} readings, plus ${preview.vehicleCount} vehicles " +
+                        "and ${preview.vehicleRecordCount} vehicle records. Importing will replace all data " +
                         "currently stored in MeterX on this device.",
                 )
             },
@@ -351,7 +403,7 @@ private fun MandatoryUpdateDialog(
                     )
                 }
                 Text(
-                    "Your meters, readings, payments, and settings stay on the phone during the update.",
+                    "Your meters, vehicles, records, payments, and settings stay on the phone during the update.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -494,6 +546,7 @@ private fun MeterListScreen(
     syncStatus: MeterViewModel.SyncStatus,
     onSync: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenVehicles: () -> Unit,
 ) {
     var showAddMeter by rememberSaveable { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<MeterEntity?>(null) }
@@ -506,6 +559,13 @@ private fun MeterListScreen(
                 onClick = { showAddMeter = true },
                 icon = { Icon(Icons.Rounded.Add, contentDescription = null) },
                 text = { Text("Add meter") },
+            )
+        },
+        bottomBar = {
+            MainNavigationBar(
+                selected = MainSection.METERS,
+                onSelectMeters = {},
+                onSelectVehicles = onOpenVehicles,
             )
         },
     ) { padding ->
@@ -2482,6 +2542,423 @@ private fun ReadingDialog(
             DatePicker(state = state)
         }
     }
+}
+
+@Composable
+private fun MainNavigationBar(
+    selected: MainSection,
+    onSelectMeters: () -> Unit,
+    onSelectVehicles: () -> Unit,
+) {
+    NavigationBar {
+        NavigationBarItem(
+            selected = selected == MainSection.METERS,
+            onClick = onSelectMeters,
+            icon = { Icon(Icons.Rounded.Speed, contentDescription = null) },
+            label = { Text("Meters") },
+        )
+        NavigationBarItem(
+            selected = selected == MainSection.VEHICLES,
+            onClick = onSelectVehicles,
+            icon = { Icon(Icons.Rounded.DirectionsCar, contentDescription = null) },
+            label = { Text("Vehicles") },
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun VehicleListScreen(
+    vehicles: List<VehicleWithRecords>,
+    snackbarHostState: SnackbarHostState,
+    onOpenVehicle: (VehicleWithRecords) -> Unit,
+    onAddVehicle: (String, String, Long) -> Unit,
+    onDeleteVehicle: (VehicleEntity) -> Unit,
+    username: String,
+    syncStatus: MeterViewModel.SyncStatus,
+    onSync: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onOpenMeters: () -> Unit,
+) {
+    var showAddVehicle by rememberSaveable { mutableStateOf(false) }
+    var pendingDelete by remember { mutableStateOf<VehicleEntity?>(null) }
+    Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        floatingActionButton = {
+            ExtendedFloatingActionButton(
+                onClick = { showAddVehicle = true },
+                icon = { Icon(Icons.Rounded.Add, contentDescription = null) },
+                text = { Text("Add vehicle") },
+            )
+        },
+        bottomBar = {
+            MainNavigationBar(
+                selected = MainSection.VEHICLES,
+                onSelectMeters = onOpenMeters,
+                onSelectVehicles = {},
+            )
+        },
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            item {
+                Column(
+                    modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(bottom = 10.dp),
+                ) {
+                    Text("Vehicles", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
+                    Text(
+                        "Documents, renewals and service history.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(username, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.primary)
+                        CloudSyncButton(status = syncStatus, onClick = onSync)
+                        IconButton(onClick = onOpenSettings) {
+                            Icon(Icons.Rounded.Settings, contentDescription = "Settings")
+                        }
+                    }
+                }
+            }
+            item { VehicleDashboardCard(vehicles) }
+            if (vehicles.isEmpty()) {
+                item {
+                    Card(shape = RoundedCornerShape(24.dp)) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(24.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Icon(Icons.Rounded.DirectionsCar, contentDescription = null, modifier = Modifier.size(40.dp))
+                            Text("No vehicles yet", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                            Text("Add a vehicle to track its documents, costs and upcoming renewals.")
+                            Button(onClick = { showAddVehicle = true }) { Text("Add vehicle") }
+                        }
+                    }
+                }
+            } else {
+                item { Text("Your vehicles", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold) }
+                items(vehicles, key = { it.vehicle.id }) { item ->
+                    VehicleCard(
+                        item = item,
+                        onClick = { onOpenVehicle(item) },
+                        onDelete = { pendingDelete = item.vehicle },
+                    )
+                }
+                item { Spacer(Modifier.height(72.dp)) }
+            }
+        }
+    }
+    if (showAddVehicle) {
+        VehicleDialog(
+            onDismiss = { showAddVehicle = false },
+            onSave = { name, registration, km ->
+                onAddVehicle(name, registration, km)
+                showAddVehicle = false
+            },
+        )
+    }
+    pendingDelete?.let { vehicle ->
+        ConfirmDeleteDialog(
+            title = "Delete ${vehicle.name}?",
+            message = "This also deletes its document and service history. This cannot be undone.",
+            onDismiss = { pendingDelete = null },
+            onConfirm = { onDeleteVehicle(vehicle); pendingDelete = null },
+        )
+    }
+}
+
+@Composable
+private fun VehicleDashboardCard(vehicles: List<VehicleWithRecords>) {
+    val today = LocalDate.now().toEpochDay()
+    val currentRecords = vehicles.flatMap { item ->
+        VehicleRecordType.entries.mapNotNull { type ->
+            item.latestRecord(type)?.let { item.vehicle to it }
+        }
+    }.sortedBy { it.second.nextDueDate }
+    val overdue = currentRecords.count { it.second.nextDueDate < today }
+    val dueSoon = currentRecords.count { it.second.nextDueDate in today..(today + 30) }
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+    ) {
+        Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text("Renewal dashboard", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                DashboardMetric("Vehicles", vehicles.size.toString(), Modifier.weight(1f))
+                DashboardMetric("Overdue", overdue.toString(), Modifier.weight(1f))
+                DashboardMetric("Due in 30 days", dueSoon.toString(), Modifier.weight(1f))
+            }
+            if (currentRecords.isEmpty()) {
+                Text("Add pollution, insurance or service records to see renewal dates here.")
+            } else {
+                Text("Next renewals", fontWeight = FontWeight.SemiBold)
+                currentRecords.take(4).forEach { (vehicle, record) ->
+                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("${vehicle.name} · ${record.type.displayName()}", fontWeight = FontWeight.Medium)
+                            Text(vehicle.registrationNumber, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Text(
+                            renewalStatus(record.nextDueDate, today),
+                            color = if (record.nextDueDate <= today + 30) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.onPrimaryContainer,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun VehicleCard(item: VehicleWithRecords, onClick: () -> Unit, onDelete: () -> Unit) {
+    val next = VehicleRecordType.entries.mapNotNull(item::latestRecord).minByOrNull { it.nextDueDate }
+    Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick), shape = RoundedCornerShape(22.dp)) {
+        Row(modifier = Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.DirectionsCar, contentDescription = null, modifier = Modifier.size(34.dp))
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(item.vehicle.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(item.vehicle.registrationNumber, color = MaterialTheme.colorScheme.primary)
+                Text("${item.vehicle.currentKm} km · ${item.records.size} records", style = MaterialTheme.typography.bodySmall)
+                next?.let { Text("Next: ${it.type.displayName()} on ${formatDate(it.nextDueDate)}", style = MaterialTheme.typography.bodySmall) }
+            }
+            IconButton(onClick = onDelete) { Icon(Icons.Rounded.DeleteOutline, contentDescription = "Delete vehicle") }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun VehicleDetailScreen(
+    item: VehicleWithRecords,
+    snackbarHostState: SnackbarHostState,
+    onBack: () -> Unit,
+    onUpdateVehicle: (String, String, Long) -> Unit,
+    onAddRecord: (VehicleRecordType, Long, Long, Double?, Long, String?) -> Unit,
+    onDeleteRecord: (VehicleRecordEntity) -> Unit,
+) {
+    var showAddRecord by rememberSaveable { mutableStateOf(false) }
+    var showEditVehicle by rememberSaveable { mutableStateOf(false) }
+    var pendingDelete by remember { mutableStateOf<VehicleRecordEntity?>(null) }
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        topBar = {
+            TopAppBar(
+                title = { Column { Text(item.vehicle.name); Text(item.vehicle.registrationNumber, style = MaterialTheme.typography.bodySmall) } },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back") } },
+                actions = { IconButton(onClick = { showEditVehicle = true }) { Icon(Icons.Rounded.Edit, contentDescription = "Edit vehicle") } },
+            )
+        },
+        floatingActionButton = {
+            ExtendedFloatingActionButton(
+                onClick = { showAddRecord = true },
+                icon = { Icon(Icons.Rounded.Add, contentDescription = null) },
+                text = { Text("Add record") },
+            )
+        },
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item {
+                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), shape = RoundedCornerShape(24.dp)) {
+                    Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Current odometer", color = MaterialTheme.colorScheme.onPrimaryContainer)
+                        Text("${item.vehicle.currentKm} km", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                        VehicleRecordType.entries.forEach { type ->
+                            val record = item.latestRecord(type)
+                            Text(
+                                if (record == null) "${type.displayName()}: no record"
+                                else "${type.displayName()}: renew ${formatDate(record.nextDueDate)}",
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
+                    }
+                }
+            }
+            item { Text("History", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold) }
+            if (item.records.isEmpty()) {
+                item { Text("No document or service records yet.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            } else {
+                items(item.sortedRecords, key = { it.id }) { record ->
+                    VehicleRecordCard(record = record, onDelete = { pendingDelete = record })
+                }
+            }
+            item { Spacer(Modifier.height(72.dp)) }
+        }
+    }
+    if (showAddRecord) {
+        VehicleRecordDialog(
+            currentKm = item.vehicle.currentKm,
+            onDismiss = { showAddRecord = false },
+            onSave = { type, date, nextDate, amount, km, notes ->
+                onAddRecord(type, date, nextDate, amount, km, notes)
+                showAddRecord = false
+            },
+        )
+    }
+    if (showEditVehicle) {
+        VehicleDialog(
+            vehicle = item.vehicle,
+            onDismiss = { showEditVehicle = false },
+            onSave = { name, registration, km ->
+                onUpdateVehicle(name, registration, km)
+                showEditVehicle = false
+            },
+        )
+    }
+    pendingDelete?.let { record ->
+        ConfirmDeleteDialog(
+            title = "Delete ${record.type.displayName()} record?",
+            message = "This removes the saved date, amount and renewal date.",
+            onDismiss = { pendingDelete = null },
+            onConfirm = { onDeleteRecord(record); pendingDelete = null },
+        )
+    }
+}
+
+@Composable
+private fun VehicleRecordCard(record: VehicleRecordEntity, onDelete: () -> Unit) {
+    val today = LocalDate.now().toEpochDay()
+    Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
+        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(record.type.displayName(), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text("Completed ${formatDate(record.recordDate)} · ${record.kmReading} km")
+                Text(
+                    "Renew ${formatDate(record.nextDueDate)} · ${renewalStatus(record.nextDueDate, today)}",
+                    color = if (record.nextDueDate <= today + 30) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Medium,
+                )
+                record.amount?.let { Text("Amount ${formatCurrency(it)}", style = MaterialTheme.typography.bodySmall) }
+                record.notes?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            }
+            IconButton(onClick = onDelete) { Icon(Icons.Rounded.DeleteOutline, contentDescription = "Delete record") }
+        }
+    }
+}
+
+@Composable
+private fun VehicleDialog(
+    vehicle: VehicleEntity? = null,
+    onDismiss: () -> Unit,
+    onSave: (String, String, Long) -> Unit,
+) {
+    var name by rememberSaveable(vehicle?.id) { mutableStateOf(vehicle?.name.orEmpty()) }
+    var registration by rememberSaveable(vehicle?.id) { mutableStateOf(vehicle?.registrationNumber.orEmpty()) }
+    var km by rememberSaveable(vehicle?.id) { mutableStateOf(vehicle?.currentKm?.toString().orEmpty()) }
+    var attempted by rememberSaveable { mutableStateOf(false) }
+    val parsedKm = km.toLongOrNull()
+    val valid = name.isNotBlank() && registration.isNotBlank() && parsedKm != null && parsedKm >= 0
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (vehicle == null) "Add vehicle" else "Edit vehicle") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(value = name, onValueChange = { name = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Vehicle name *") }, singleLine = true)
+                OutlinedTextField(value = registration, onValueChange = { registration = it.uppercase() }, modifier = Modifier.fillMaxWidth(), label = { Text("Registration number *") }, singleLine = true)
+                OutlinedTextField(value = km, onValueChange = { km = it.filter(Char::isDigit) }, modifier = Modifier.fillMaxWidth(), label = { Text("Current km reading *") }, suffix = { Text("km") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), isError = attempted && !valid, singleLine = true)
+            }
+        },
+        confirmButton = { Button(onClick = { attempted = true; if (valid) onSave(name, registration, parsedKm!!) }) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun VehicleRecordDialog(
+    currentKm: Long,
+    onDismiss: () -> Unit,
+    onSave: (VehicleRecordType, Long, Long, Double?, Long, String?) -> Unit,
+) {
+    var type by rememberSaveable { mutableStateOf(VehicleRecordType.POLLUTION) }
+    var recordDate by rememberSaveable { mutableLongStateOf(LocalDate.now().toEpochDay()) }
+    var nextDate by rememberSaveable { mutableLongStateOf(LocalDate.now().plusYears(1).toEpochDay()) }
+    var amount by rememberSaveable { mutableStateOf("") }
+    var km by rememberSaveable { mutableStateOf(currentKm.toString()) }
+    var notes by rememberSaveable { mutableStateOf("") }
+    var showRecordDate by rememberSaveable { mutableStateOf(false) }
+    var showNextDate by rememberSaveable { mutableStateOf(false) }
+    var attempted by rememberSaveable { mutableStateOf(false) }
+    val parsedAmount = amount.toDoubleOrNull()
+    val parsedKm = km.toLongOrNull()
+    val amountRequired = type != VehicleRecordType.POLLUTION
+    val valid = parsedKm != null && parsedKm >= 0 && nextDate >= recordDate &&
+        (!amountRequired || (parsedAmount != null && parsedAmount >= 0)) && notes.length <= 500
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add vehicle record") },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Record type", fontWeight = FontWeight.SemiBold)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    VehicleRecordType.entries.forEach { option ->
+                        FilterChip(selected = type == option, onClick = { type = option }, label = { Text(option.displayName()) })
+                    }
+                }
+                OutlinedButton(onClick = { showRecordDate = true }, modifier = Modifier.fillMaxWidth()) { Text("Completed: ${formatDate(recordDate)}") }
+                OutlinedButton(onClick = { showNextDate = true }, modifier = Modifier.fillMaxWidth()) { Text("Next renewal: ${formatDate(nextDate)}") }
+                OutlinedTextField(
+                    value = amount,
+                    onValueChange = { amount = it.filterDecimal() },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(if (amountRequired) "Amount *" else "Amount (optional)") },
+                    prefix = { Text("₹") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                )
+                OutlinedTextField(value = km, onValueChange = { km = it.filter(Char::isDigit) }, modifier = Modifier.fillMaxWidth(), label = { Text("Km reading *") }, suffix = { Text("km") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
+                OutlinedTextField(value = notes, onValueChange = { notes = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Notes (optional)") }, maxLines = 3)
+                if (attempted && !valid) Text("Check the dates, amount and km reading.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            }
+        },
+        confirmButton = { Button(onClick = { attempted = true; if (valid) onSave(type, recordDate, nextDate, parsedAmount, parsedKm!!, notes.takeIf(String::isNotBlank)) }) { Text("Add record") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+    if (showRecordDate) {
+        EpochDatePickerDialog(recordDate, { showRecordDate = false }) { recordDate = it; showRecordDate = false }
+    }
+    if (showNextDate) {
+        EpochDatePickerDialog(nextDate, { showNextDate = false }) { nextDate = it; showNextDate = false }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EpochDatePickerDialog(initialDate: Long, onDismiss: () -> Unit, onSelect: (Long) -> Unit) {
+    val initialMillis = LocalDate.ofEpochDay(initialDate).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+    val state = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = {
+                state.selectedDateMillis?.let { onSelect(Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate().toEpochDay()) }
+            }) { Text("Done") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    ) { DatePicker(state = state) }
+}
+
+private fun VehicleRecordType.displayName(): String = when (this) {
+    VehicleRecordType.POLLUTION -> "Pollution certificate"
+    VehicleRecordType.INSURANCE -> "Insurance"
+    VehicleRecordType.SERVICE -> "Service"
+}
+
+private fun renewalStatus(dueDate: Long, today: Long): String = when {
+    dueDate < today -> "Overdue by ${today - dueDate} days"
+    dueDate == today -> "Due today"
+    dueDate <= today + 30 -> "Due in ${dueDate - today} days"
+    else -> formatDate(dueDate)
 }
 
 @Composable

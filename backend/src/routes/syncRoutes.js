@@ -4,6 +4,8 @@ import { Meter } from "../models/Meter.js";
 import { PaymentMethod } from "../models/PaymentMethod.js";
 import { PaymentRecord } from "../models/PaymentRecord.js";
 import { Reading } from "../models/Reading.js";
+import { Vehicle } from "../models/Vehicle.js";
+import { VehicleRecord } from "../models/VehicleRecord.js";
 import { snapshotSchema } from "../validation.js";
 import { toMeterDocument, toMeterResponse } from "./meterRoutes.js";
 import { toReadingDocument, toReadingResponse } from "./readingRoutes.js";
@@ -13,7 +15,7 @@ export function createSyncRouter() {
 
   router.get("/", async (request, response, next) => {
     try {
-      const [meters, readings, paymentMethods, payments] = await Promise.all([
+      const [meters, readings, paymentMethods, payments, vehicles, vehicleRecords] = await Promise.all([
         Meter.find({ ownerId: request.user.id })
           .sort({ clientCreatedAt: -1 })
           .lean(),
@@ -26,14 +28,22 @@ export function createSyncRouter() {
         PaymentRecord.find({ ownerId: request.user.id })
           .sort({ paymentDate: -1, clientCreatedAt: -1 })
           .lean(),
+        Vehicle.find({ ownerId: request.user.id })
+          .sort({ clientCreatedAt: -1 })
+          .lean(),
+        VehicleRecord.find({ ownerId: request.user.id })
+          .sort({ nextDueDate: 1, clientCreatedAt: -1 })
+          .lean(),
       ]);
       return response.json({
-        version: 3,
+        version: 4,
         syncedAt: Date.now(),
         meters: meters.map(toMeterResponse),
         readings: readings.map(toReadingResponse),
         paymentMethods: paymentMethods.map(toPaymentMethodResponse),
         payments: payments.map(toPaymentRecordResponse),
+        vehicles: vehicles.map(toVehicleResponse),
+        vehicleRecords: vehicleRecords.map(toVehicleRecordResponse),
       });
     } catch (error) {
       return next(error);
@@ -49,6 +59,8 @@ export function createSyncRouter() {
         await PaymentMethod.deleteMany({ ownerId: request.user.id }).session(session);
         await Reading.deleteMany({ ownerId: request.user.id }).session(session);
         await Meter.deleteMany({ ownerId: request.user.id }).session(session);
+        await VehicleRecord.deleteMany({ ownerId: request.user.id }).session(session);
+        await Vehicle.deleteMany({ ownerId: request.user.id }).session(session);
 
         if (snapshot.paymentMethods.length) {
           await PaymentMethod.insertMany(
@@ -80,6 +92,20 @@ export function createSyncRouter() {
             { session },
           );
         }
+        if (snapshot.vehicles.length) {
+          await Vehicle.insertMany(
+            snapshot.vehicles.map((vehicle) => toVehicleDocument(request.user.id, vehicle)),
+            { session },
+          );
+        }
+        if (snapshot.vehicleRecords.length) {
+          await VehicleRecord.insertMany(
+            snapshot.vehicleRecords.map((record) =>
+              toVehicleRecordDocument(request.user.id, record),
+            ),
+            { session },
+          );
+        }
       });
       return response.json({
         syncedAt: Date.now(),
@@ -87,6 +113,8 @@ export function createSyncRouter() {
         readingCount: snapshot.readings.length,
         paymentMethodCount: snapshot.paymentMethods.length,
         paymentCount: snapshot.payments.length,
+        vehicleCount: snapshot.vehicles.length,
+        vehicleRecordCount: snapshot.vehicleRecords.length,
       });
     } catch (error) {
       return next(error);
@@ -96,6 +124,58 @@ export function createSyncRouter() {
   });
 
   return router;
+}
+
+function toVehicleDocument(ownerId, vehicle) {
+  return {
+    ownerId,
+    clientId: vehicle.clientId,
+    name: vehicle.name,
+    registrationNumber: vehicle.registrationNumber,
+    currentKm: vehicle.currentKm,
+    clientCreatedAt: vehicle.createdAt,
+  };
+}
+
+function toVehicleResponse(vehicle) {
+  return {
+    clientId: vehicle.clientId,
+    name: vehicle.name,
+    registrationNumber: vehicle.registrationNumber,
+    currentKm: vehicle.currentKm,
+    createdAt: vehicle.clientCreatedAt,
+    updatedAt: vehicle.updatedAt,
+  };
+}
+
+function toVehicleRecordDocument(ownerId, record) {
+  return {
+    ownerId,
+    clientId: record.clientId,
+    vehicleClientId: record.vehicleClientId,
+    type: record.type,
+    recordDate: record.recordDate,
+    nextDueDate: record.nextDueDate,
+    amount: record.amount ?? null,
+    kmReading: record.kmReading,
+    notes: record.notes ?? null,
+    clientCreatedAt: record.createdAt,
+  };
+}
+
+function toVehicleRecordResponse(record) {
+  return {
+    clientId: record.clientId,
+    vehicleClientId: record.vehicleClientId,
+    type: record.type,
+    recordDate: record.recordDate,
+    nextDueDate: record.nextDueDate,
+    amount: record.amount,
+    kmReading: record.kmReading,
+    notes: record.notes,
+    createdAt: record.clientCreatedAt,
+    updatedAt: record.updatedAt,
+  };
 }
 
 function toPaymentMethodDocument(ownerId, method) {

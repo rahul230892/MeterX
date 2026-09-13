@@ -13,6 +13,8 @@ data class ImportPreview(
     val readingCount: Int,
     val paymentMethodCount: Int,
     val paymentCount: Int,
+    val vehicleCount: Int,
+    val vehicleRecordCount: Int,
 )
 
 data class ImportedData(
@@ -20,16 +22,19 @@ data class ImportedData(
     val readings: List<ReadingEntity>,
     val paymentMethods: List<PaymentMethodEntity>,
     val payments: List<PaymentRecordEntity>,
+    val vehicles: List<VehicleEntity>,
+    val vehicleRecords: List<VehicleRecordEntity>,
 )
 
 class LocalBackup(private val context: Context) {
     suspend fun write(
         meters: List<MeterWithReadings>,
         paymentMethods: List<PaymentMethodEntity>,
+        vehicles: List<VehicleWithRecords>,
     ) = withContext(Dispatchers.IO) {
         val target = context.filesDir.resolve("meterx_backup.json")
         val temporary = context.filesDir.resolve("meterx_backup.tmp")
-        temporary.writeText(encode(meters, paymentMethods))
+        temporary.writeText(encode(meters, paymentMethods, vehicles))
         if (!temporary.renameTo(target)) {
             target.writeText(temporary.readText())
             temporary.delete()
@@ -40,9 +45,10 @@ class LocalBackup(private val context: Context) {
         uri: Uri,
         meters: List<MeterWithReadings>,
         paymentMethods: List<PaymentMethodEntity>,
+        vehicles: List<VehicleWithRecords>,
     ) = withContext(Dispatchers.IO) {
         context.contentResolver.openOutputStream(uri, "w")?.bufferedWriter()?.use {
-            it.write(encode(meters, paymentMethods))
+            it.write(encode(meters, paymentMethods, vehicles))
         } ?: error("Unable to open the selected file.")
     }
 
@@ -54,6 +60,8 @@ class LocalBackup(private val context: Context) {
             readingCount = data.readings.size,
             paymentMethodCount = data.paymentMethods.size,
             paymentCount = data.payments.size,
+            vehicleCount = data.vehicles.size,
+            vehicleRecordCount = data.vehicleRecords.size,
         )
     }
 
@@ -68,6 +76,7 @@ class LocalBackup(private val context: Context) {
     private fun encode(
         meters: List<MeterWithReadings>,
         paymentMethods: List<PaymentMethodEntity>,
+        vehicles: List<VehicleWithRecords>,
     ): String {
         val methodArray = JSONArray()
         paymentMethods.forEach { method ->
@@ -140,12 +149,40 @@ class LocalBackup(private val context: Context) {
             )
         }
 
+        val vehicleArray = JSONArray()
+        vehicles.forEach { item ->
+            val records = JSONArray()
+            item.sortedRecords.forEach { record ->
+                records.put(
+                    JSONObject()
+                        .put("id", record.id)
+                        .put("type", record.type.name)
+                        .put("recordDate", record.recordDate)
+                        .put("nextDueDate", record.nextDueDate)
+                        .put("amount", record.amount ?: JSONObject.NULL)
+                        .put("kmReading", record.kmReading)
+                        .put("notes", record.notes ?: JSONObject.NULL)
+                        .put("createdAt", record.createdAt),
+                )
+            }
+            vehicleArray.put(
+                JSONObject()
+                    .put("id", item.vehicle.id)
+                    .put("name", item.vehicle.name)
+                    .put("registrationNumber", item.vehicle.registrationNumber)
+                    .put("currentKm", item.vehicle.currentKm)
+                    .put("createdAt", item.vehicle.createdAt)
+                    .put("records", records),
+            )
+        }
+
         return JSONObject()
             .put("format", "meterx-backup")
-            .put("version", 3)
+            .put("version", 4)
             .put("exportedAt", System.currentTimeMillis())
             .put("paymentMethods", methodArray)
             .put("meters", meterArray)
+            .put("vehicles", vehicleArray)
             .toString(2)
     }
 
@@ -156,7 +193,7 @@ class LocalBackup(private val context: Context) {
             error("This is not a valid MeterX data file.")
         }
         val version = root.optInt("version", -1)
-        require(version in 1..3) {
+        require(version in 1..4) {
             "This MeterX data file version is not supported."
         }
         val meterArray = root.optJSONArray("meters")
@@ -165,10 +202,14 @@ class LocalBackup(private val context: Context) {
         val readings = mutableListOf<ReadingEntity>()
         val paymentMethods = mutableListOf<PaymentMethodEntity>()
         val payments = mutableListOf<PaymentRecordEntity>()
+        val vehicles = mutableListOf<VehicleEntity>()
+        val vehicleRecords = mutableListOf<VehicleRecordEntity>()
         val meterIds = mutableSetOf<Long>()
         val readingIds = mutableSetOf<Long>()
         val paymentMethodIds = mutableSetOf<Long>()
         val paymentIds = mutableSetOf<Long>()
+        val vehicleIds = mutableSetOf<Long>()
+        val vehicleRecordIds = mutableSetOf<Long>()
 
         val methodArray = root.optJSONArray("paymentMethods") ?: JSONArray()
         repeat(methodArray.length()) { methodIndex ->
@@ -305,7 +346,65 @@ class LocalBackup(private val context: Context) {
                 )
             }
         }
-        return ImportedData(meters, readings, paymentMethods, payments)
+        val vehicleArray = root.optJSONArray("vehicles") ?: JSONArray()
+        repeat(vehicleArray.length()) { vehicleIndex ->
+            val json = vehicleArray.optJSONObject(vehicleIndex)
+                ?: error("A vehicle record is invalid.")
+            val id = json.optLong("id", 0)
+            val name = json.optString("name").trim()
+            val registrationNumber = json.optString("registrationNumber").trim()
+            val currentKm = json.optLong("currentKm", -1)
+            require(
+                id > 0 && vehicleIds.add(id) && name.isNotEmpty() &&
+                    registrationNumber.isNotEmpty() && currentKm >= 0,
+            ) { "A vehicle record is incomplete or duplicated." }
+            vehicles += VehicleEntity(
+                id = id,
+                name = name,
+                registrationNumber = registrationNumber,
+                currentKm = currentKm,
+                createdAt = json.optLong("createdAt", System.currentTimeMillis()),
+            )
+            val recordArray = json.optJSONArray("records") ?: JSONArray()
+            repeat(recordArray.length()) { recordIndex ->
+                val record = recordArray.optJSONObject(recordIndex)
+                    ?: error("A vehicle document record is invalid.")
+                val recordId = record.optLong("id", 0)
+                val recordDate = record.optLong("recordDate", Long.MIN_VALUE)
+                val nextDueDate = record.optLong("nextDueDate", Long.MIN_VALUE)
+                val kmReading = record.optLong("kmReading", -1)
+                val type = runCatching {
+                    VehicleRecordType.valueOf(record.getString("type"))
+                }.getOrElse { error("A vehicle document has an unsupported type.") }
+                val amount = record.nullableDouble("amount")
+                require(
+                    recordId > 0 && vehicleRecordIds.add(recordId) &&
+                        recordDate != Long.MIN_VALUE && nextDueDate != Long.MIN_VALUE &&
+                        nextDueDate >= recordDate && kmReading >= 0 &&
+                        (amount == null || amount >= 0) &&
+                        (type == VehicleRecordType.POLLUTION || amount != null),
+                ) { "A vehicle document record is incomplete or duplicated." }
+                vehicleRecords += VehicleRecordEntity(
+                    id = recordId,
+                    vehicleId = id,
+                    type = type,
+                    recordDate = recordDate,
+                    nextDueDate = nextDueDate,
+                    amount = amount,
+                    kmReading = kmReading,
+                    notes = record.nullableString("notes"),
+                    createdAt = record.optLong("createdAt", System.currentTimeMillis()),
+                )
+            }
+        }
+        return ImportedData(
+            meters,
+            readings,
+            paymentMethods,
+            payments,
+            vehicles,
+            vehicleRecords,
+        )
     }
 
     private fun JSONObject.nullableString(key: String): String? =

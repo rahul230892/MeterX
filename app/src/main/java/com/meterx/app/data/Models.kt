@@ -14,6 +14,12 @@ enum class MeterType {
     GAS,
 }
 
+enum class VehicleRecordType {
+    POLLUTION,
+    INSURANCE,
+    SERVICE,
+}
+
 data class CustomFieldDefinition(
     val id: String,
     val name: String,
@@ -96,6 +102,59 @@ data class PaymentRecordEntity(
     @ColumnInfo(name = "method_name") val methodName: String,
     @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis(),
 )
+
+@Entity(tableName = "vehicles")
+data class VehicleEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    @ColumnInfo(name = "registration_number") val registrationNumber: String,
+    @ColumnInfo(name = "current_km") val currentKm: Long,
+    @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis(),
+)
+
+@Entity(
+    tableName = "vehicle_records",
+    foreignKeys = [
+        ForeignKey(
+            entity = VehicleEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["vehicle_id"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [Index("vehicle_id"), Index("next_due_date")],
+)
+data class VehicleRecordEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    @ColumnInfo(name = "vehicle_id") val vehicleId: Long,
+    val type: VehicleRecordType,
+    @ColumnInfo(name = "record_date") val recordDate: Long,
+    @ColumnInfo(name = "next_due_date") val nextDueDate: Long,
+    val amount: Double?,
+    @ColumnInfo(name = "km_reading") val kmReading: Long,
+    val notes: String?,
+    @ColumnInfo(name = "created_at") val createdAt: Long = System.currentTimeMillis(),
+)
+
+data class VehicleWithRecords(
+    @Embedded val vehicle: VehicleEntity,
+    @Relation(parentColumn = "id", entityColumn = "vehicle_id")
+    val records: List<VehicleRecordEntity>,
+) {
+    val sortedRecords: List<VehicleRecordEntity>
+        get() = records.sortedWith(
+            compareByDescending<VehicleRecordEntity> { it.recordDate }
+                .thenByDescending { it.createdAt },
+        )
+
+    fun latestRecord(type: VehicleRecordType): VehicleRecordEntity? = records
+        .asSequence()
+        .filter { it.type == type }
+        .maxWithOrNull(
+            compareBy<VehicleRecordEntity> { it.recordDate }
+                .thenBy { it.createdAt },
+        )
+}
 
 data class MeterWithReadings(
     @Embedded val meter: MeterEntity,

@@ -31,6 +31,12 @@ MongoDB-backed cloud sync service.
 - Show an animated cloud icon while syncing, a completion icon when current,
   and a retry state if an upload fails.
 - Keep reminders, data transfer, and account controls together in Settings.
+- Keep meter tracking and vehicle tracking in separate top-level sections.
+- Add any number of vehicles with registration details and a current odometer reading.
+- Record pollution certificates, insurance, and service history with completed and next renewal dates.
+- Track insurance and service amounts, kilometre readings, and optional notes.
+- Review overdue and upcoming vehicle renewals in a dedicated vehicle dashboard.
+- Include vehicle records in local backup, JSON export/import, and cloud sync.
 
 ## Cloud sync
 

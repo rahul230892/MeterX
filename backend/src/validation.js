@@ -101,12 +101,40 @@ export const paymentSchema = z.object({
   createdAt: z.number().int().nonnegative(),
 });
 
+export const vehicleSchema = z.object({
+  clientId: z.union([z.string(), z.number()]).transform(String),
+  name: z.string().trim().min(1).max(120),
+  registrationNumber: z.string().trim().min(1).max(40),
+  currentKm: z.number().int().nonnegative(),
+  createdAt: z.number().int().nonnegative(),
+});
+
+export const vehicleRecordSchema = z.object({
+  clientId: z.union([z.string(), z.number()]).transform(String),
+  vehicleClientId: z.union([z.string(), z.number()]).transform(String),
+  type: z.enum(["POLLUTION", "INSURANCE", "SERVICE"]),
+  recordDate: z.number().int(),
+  nextDueDate: z.number().int(),
+  amount: z.number().nonnegative().nullable().optional(),
+  kmReading: z.number().int().nonnegative(),
+  notes: z.string().trim().max(500).nullable().optional(),
+  createdAt: z.number().int().nonnegative(),
+}).refine((record) => record.nextDueDate >= record.recordDate, {
+  path: ["nextDueDate"],
+  message: "Next due date cannot be before the record date.",
+}).refine((record) => record.type === "POLLUTION" || record.amount != null, {
+  path: ["amount"],
+  message: "Insurance and service records require an amount.",
+});
+
 export const snapshotSchema = z
   .object({
     meters: z.array(meterSchema).max(10000),
     readings: z.array(readingSchema).max(100000),
     paymentMethods: z.array(paymentMethodSchema).max(1000).default([]),
     payments: z.array(paymentSchema).max(100000).default([]),
+    vehicles: z.array(vehicleSchema).max(10000).default([]),
+    vehicleRecords: z.array(vehicleRecordSchema).max(100000).default([]),
   })
   .superRefine((snapshot, context) => {
     const meterIds = new Set(snapshot.meters.map((meter) => meter.clientId));
@@ -126,6 +154,9 @@ export const snapshotSchema = z
     const uniquePaymentMethodIds = new Set();
     const uniquePaymentIds = new Set();
     const paidReadingIds = new Set();
+    const vehicleIds = new Set(snapshot.vehicles.map((vehicle) => vehicle.clientId));
+    const uniqueVehicleIds = new Set();
+    const uniqueVehicleRecordIds = new Set();
 
     snapshot.meters.forEach((meter, index) => {
       if (uniqueMeterIds.has(meter.clientId)) {
@@ -208,5 +239,34 @@ export const snapshotSchema = z
       }
       uniquePaymentIds.add(payment.clientId);
       paidReadingIds.add(payment.readingClientId);
+    });
+
+    snapshot.vehicles.forEach((vehicle, index) => {
+      if (uniqueVehicleIds.has(vehicle.clientId)) {
+        context.addIssue({
+          code: "custom",
+          path: ["vehicles", index, "clientId"],
+          message: "Duplicate vehicle clientId.",
+        });
+      }
+      uniqueVehicleIds.add(vehicle.clientId);
+    });
+
+    snapshot.vehicleRecords.forEach((record, index) => {
+      if (!vehicleIds.has(record.vehicleClientId)) {
+        context.addIssue({
+          code: "custom",
+          path: ["vehicleRecords", index, "vehicleClientId"],
+          message: "Vehicle record references an unknown vehicle.",
+        });
+      }
+      if (uniqueVehicleRecordIds.has(record.clientId)) {
+        context.addIssue({
+          code: "custom",
+          path: ["vehicleRecords", index, "clientId"],
+          message: "Duplicate vehicle record clientId.",
+        });
+      }
+      uniqueVehicleRecordIds.add(record.clientId);
     });
   });

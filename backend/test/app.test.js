@@ -200,3 +200,56 @@ test("snapshot validation keeps custom columns scoped to their meter", () => {
 
   assert.equal(result.success, false);
 });
+
+test("snapshot validation accepts vehicles and renewal records", () => {
+  const snapshot = snapshotSchema.parse({
+    meters: [],
+    readings: [],
+    vehicles: [
+      {
+        clientId: "v1",
+        name: "Family car",
+        registrationNumber: "DL01AB1234",
+        currentKm: 42000,
+        createdAt: 1710000000000,
+      },
+    ],
+    vehicleRecords: [
+      {
+        clientId: "vr1",
+        vehicleClientId: "v1",
+        type: "INSURANCE",
+        recordDate: 20500,
+        nextDueDate: 20865,
+        amount: 12500,
+        kmReading: 42000,
+        notes: "Comprehensive cover",
+        createdAt: 1710000000000,
+      },
+    ],
+  });
+
+  assert.equal(snapshot.vehicles[0].currentKm, 42000);
+  assert.equal(snapshot.vehicleRecords[0].type, "INSURANCE");
+});
+
+test("snapshot validation rejects orphan vehicle records", () => {
+  const result = snapshotSchema.safeParse({
+    meters: [],
+    readings: [],
+    vehicleRecords: [
+      {
+        clientId: "vr1",
+        vehicleClientId: "missing",
+        type: "SERVICE",
+        recordDate: 20500,
+        nextDueDate: 20680,
+        amount: 4000,
+        kmReading: 42000,
+        createdAt: 1710000000000,
+      },
+    ],
+  });
+
+  assert.equal(result.success, false);
+});

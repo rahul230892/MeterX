@@ -25,6 +25,14 @@ interface MeterDao {
     @Query("SELECT * FROM payment_methods ORDER BY name COLLATE NOCASE")
     suspend fun getPaymentMethodsSnapshot(): List<PaymentMethodEntity>
 
+    @Transaction
+    @Query("SELECT * FROM vehicles ORDER BY created_at DESC")
+    fun observeVehicles(): Flow<List<VehicleWithRecords>>
+
+    @Transaction
+    @Query("SELECT * FROM vehicles ORDER BY created_at DESC")
+    suspend fun getVehiclesSnapshot(): List<VehicleWithRecords>
+
     @Insert
     suspend fun insertMeter(meter: MeterEntity): Long
 
@@ -69,6 +77,36 @@ interface MeterDao {
 
     @Query("DELETE FROM payment_records WHERE reading_id = :readingId")
     suspend fun deletePaymentForReading(readingId: Long)
+
+    @Insert
+    suspend fun insertVehicle(vehicle: VehicleEntity): Long
+
+    @Insert
+    suspend fun insertVehicles(vehicles: List<VehicleEntity>): List<Long>
+
+    @Update
+    suspend fun updateVehicle(vehicle: VehicleEntity)
+
+    @Delete
+    suspend fun deleteVehicle(vehicle: VehicleEntity)
+
+    @Insert
+    suspend fun insertVehicleRecord(record: VehicleRecordEntity): Long
+
+    @Insert
+    suspend fun insertVehicleRecords(records: List<VehicleRecordEntity>)
+
+    @Update
+    suspend fun updateVehicleRecord(record: VehicleRecordEntity)
+
+    @Delete
+    suspend fun deleteVehicleRecord(record: VehicleRecordEntity)
+
+    @Query("DELETE FROM vehicle_records")
+    suspend fun deleteAllVehicleRecords()
+
+    @Query("DELETE FROM vehicles")
+    suspend fun deleteAllVehicles()
 
     @Query("DELETE FROM payment_records")
     suspend fun deleteAllPaymentRecords()

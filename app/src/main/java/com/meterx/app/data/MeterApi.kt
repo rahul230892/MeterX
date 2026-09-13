@@ -17,6 +17,28 @@ data class CloudSnapshot(
     val readings: List<CloudReading>,
     val paymentMethods: List<CloudPaymentMethod>,
     val payments: List<CloudPayment>,
+    val vehicles: List<CloudVehicle>,
+    val vehicleRecords: List<CloudVehicleRecord>,
+)
+
+data class CloudVehicle(
+    val clientId: String,
+    val name: String,
+    val registrationNumber: String,
+    val currentKm: Long,
+    val createdAt: Long,
+)
+
+data class CloudVehicleRecord(
+    val clientId: String,
+    val vehicleClientId: String,
+    val type: VehicleRecordType,
+    val recordDate: Long,
+    val nextDueDate: Long,
+    val amount: Double?,
+    val kmReading: Long,
+    val notes: String?,
+    val createdAt: Long,
 )
 
 data class CloudMeter(
@@ -116,19 +138,26 @@ class MeterApi(baseUrl: String) {
             ?.toCloudPaymentMethods()
             .orEmpty()
         val payments = response.optJSONArray("payments")?.toCloudPayments().orEmpty()
-        CloudSnapshot(meters, readings, paymentMethods, payments)
+        val vehicles = response.optJSONArray("vehicles")?.toCloudVehicles().orEmpty()
+        val vehicleRecords = response.optJSONArray("vehicleRecords")
+            ?.toCloudVehicleRecords()
+            .orEmpty()
+        CloudSnapshot(meters, readings, paymentMethods, payments, vehicles, vehicleRecords)
     }
 
     suspend fun uploadSnapshot(
         token: String,
         snapshot: List<MeterWithReadings>,
         paymentMethods: List<PaymentMethodEntity>,
+        vehicles: List<VehicleWithRecords>,
     ) {
         withContext(Dispatchers.IO) {
             val meters = JSONArray()
             val readings = JSONArray()
             val methods = JSONArray()
             val payments = JSONArray()
+            val vehicleArray = JSONArray()
+            val vehicleRecordArray = JSONArray()
             paymentMethods.forEach { method ->
                 methods.put(
                     JSONObject()
@@ -175,6 +204,30 @@ class MeterApi(baseUrl: String) {
                     )
                 }
             }
+            vehicles.forEach { item ->
+                vehicleArray.put(
+                    JSONObject()
+                        .put("clientId", item.vehicle.id.toString())
+                        .put("name", item.vehicle.name)
+                        .put("registrationNumber", item.vehicle.registrationNumber)
+                        .put("currentKm", item.vehicle.currentKm)
+                        .put("createdAt", item.vehicle.createdAt),
+                )
+                item.records.forEach { record ->
+                    vehicleRecordArray.put(
+                        JSONObject()
+                            .put("clientId", record.id.toString())
+                            .put("vehicleClientId", item.vehicle.id.toString())
+                            .put("type", record.type.name)
+                            .put("recordDate", record.recordDate)
+                            .put("nextDueDate", record.nextDueDate)
+                            .putNullable("amount", record.amount)
+                            .put("kmReading", record.kmReading)
+                            .putNullable("notes", record.notes)
+                            .put("createdAt", record.createdAt),
+                    )
+                }
+            }
             request(
                 method = "PUT",
                 path = "/api/sync",
@@ -183,7 +236,9 @@ class MeterApi(baseUrl: String) {
                     .put("meters", meters)
                     .put("readings", readings)
                     .put("paymentMethods", methods)
-                    .put("payments", payments),
+                    .put("payments", payments)
+                    .put("vehicles", vehicleArray)
+                    .put("vehicleRecords", vehicleRecordArray),
             )
         }
     }
@@ -327,6 +382,40 @@ private fun JSONArray.toCloudPayments(): List<CloudPayment> = buildList {
                 amount = item.getDouble("amount"),
                 paymentDate = item.getLong("paymentDate"),
                 methodName = item.getString("methodName"),
+                createdAt = item.getLong("createdAt"),
+            ),
+        )
+    }
+}
+
+private fun JSONArray.toCloudVehicles(): List<CloudVehicle> = buildList {
+    repeat(length()) { index ->
+        val item = getJSONObject(index)
+        add(
+            CloudVehicle(
+                clientId = item.getString("clientId"),
+                name = item.getString("name"),
+                registrationNumber = item.getString("registrationNumber"),
+                currentKm = item.getLong("currentKm"),
+                createdAt = item.getLong("createdAt"),
+            ),
+        )
+    }
+}
+
+private fun JSONArray.toCloudVehicleRecords(): List<CloudVehicleRecord> = buildList {
+    repeat(length()) { index ->
+        val item = getJSONObject(index)
+        add(
+            CloudVehicleRecord(
+                clientId = item.getString("clientId"),
+                vehicleClientId = item.getString("vehicleClientId"),
+                type = VehicleRecordType.valueOf(item.getString("type")),
+                recordDate = item.getLong("recordDate"),
+                nextDueDate = item.getLong("nextDueDate"),
+                amount = item.optNullableDouble("amount"),
+                kmReading = item.getLong("kmReading"),
+                notes = item.optNullableString("notes"),
                 createdAt = item.getLong("createdAt"),
             ),
         )

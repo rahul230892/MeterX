@@ -19,6 +19,14 @@ class MeterTypeConverter {
     fun toMeterType(value: String): MeterType = MeterType.valueOf(value)
 }
 
+class VehicleRecordTypeConverter {
+    @TypeConverter
+    fun fromVehicleRecordType(value: VehicleRecordType): String = value.name
+
+    @TypeConverter
+    fun toVehicleRecordType(value: String): VehicleRecordType = VehicleRecordType.valueOf(value)
+}
+
 class CustomFieldConverters {
     @TypeConverter
     fun fromCustomFieldDefinitions(value: List<CustomFieldDefinition>): String {
@@ -77,11 +85,17 @@ class CustomFieldConverters {
         ReadingEntity::class,
         PaymentMethodEntity::class,
         PaymentRecordEntity::class,
+        VehicleEntity::class,
+        VehicleRecordEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
-@TypeConverters(MeterTypeConverter::class, CustomFieldConverters::class)
+@TypeConverters(
+    MeterTypeConverter::class,
+    VehicleRecordTypeConverter::class,
+    CustomFieldConverters::class,
+)
 abstract class MeterDatabase : RoomDatabase() {
     abstract fun meterDao(): MeterDao
 
@@ -96,7 +110,7 @@ abstract class MeterDatabase : RoomDatabase() {
                     MeterDatabase::class.java,
                     "meterx.db",
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     .build()
                     .also { instance = it }
             }
@@ -152,6 +166,44 @@ abstract class MeterDatabase : RoomDatabase() {
                 )
                 db.execSQL(
                     "ALTER TABLE readings ADD COLUMN custom_values_json TEXT NOT NULL DEFAULT '{}'",
+                )
+            }
+        }
+
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS vehicles (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        name TEXT NOT NULL,
+                        registration_number TEXT NOT NULL,
+                        current_km INTEGER NOT NULL,
+                        created_at INTEGER NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS vehicle_records (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        vehicle_id INTEGER NOT NULL,
+                        type TEXT NOT NULL,
+                        record_date INTEGER NOT NULL,
+                        next_due_date INTEGER NOT NULL,
+                        amount REAL,
+                        km_reading INTEGER NOT NULL,
+                        notes TEXT,
+                        created_at INTEGER NOT NULL,
+                        FOREIGN KEY(vehicle_id) REFERENCES vehicles(id) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_vehicle_records_vehicle_id ON vehicle_records(vehicle_id)",
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_vehicle_records_next_due_date ON vehicle_records(next_due_date)",
                 )
             }
         }

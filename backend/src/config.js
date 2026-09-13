@@ -8,14 +8,14 @@ const schema = z.object({
   JWT_SECRET: z.string().min(32),
   JWT_EXPIRES_IN: z.string().default("30d"),
   CORS_ORIGIN: z.string().default("*"),
-  APP_LATEST_VERSION_CODE: z.coerce.number().int().positive().default(9),
-  APP_LATEST_VERSION_NAME: z.string().default("1.8"),
+  APP_LATEST_VERSION_CODE: z.coerce.number().int().positive().default(10),
+  APP_LATEST_VERSION_NAME: z.string().default("1.9"),
   APP_MIN_SUPPORTED_VERSION_CODE: z.coerce.number().int().positive().default(9),
   APP_APK_URL: z.string().url().default(
     "https://meterx-backend.onrender.com/downloads/meterx-latest.apk",
   ),
   APP_RELEASE_NOTES: z.string().default(
-    "Add permanent per-meter custom columns and optional values on readings.",
+    "Add separate vehicle tracking with renewal alerts, documents, costs, and service history.",
   ),
 });
 

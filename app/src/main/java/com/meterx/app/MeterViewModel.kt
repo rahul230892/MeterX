@@ -18,6 +18,10 @@ import com.meterx.app.data.MeterWithReadings
 import com.meterx.app.data.PaymentInput
 import com.meterx.app.data.PaymentMethodEntity
 import com.meterx.app.data.ReadingEntity
+import com.meterx.app.data.VehicleEntity
+import com.meterx.app.data.VehicleRecordEntity
+import com.meterx.app.data.VehicleRecordType
+import com.meterx.app.data.VehicleWithRecords
 import com.meterx.app.reminder.ReminderManager
 import com.meterx.app.reminder.ReminderSettings
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -69,6 +73,11 @@ class MeterViewModel(
     val reminderSettings: StateFlow<ReminderSettings> = reminderManager.settings
 
     val meters: StateFlow<List<MeterWithReadings>> = repository.meters.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5_000),
+        initialValue = emptyList(),
+    )
+    val vehicles: StateFlow<List<VehicleWithRecords>> = repository.vehicles.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = emptyList(),
@@ -266,6 +275,52 @@ class MeterViewModel(
             syncOperation { repository.resetFreeUnits(meter, billedReading) }
         }
 
+    fun addVehicle(name: String, registrationNumber: String, currentKm: Long) =
+        viewModelScope.launch {
+            syncOperation { repository.addVehicle(name, registrationNumber, currentKm) }
+        }
+
+    fun updateVehicle(
+        vehicle: VehicleEntity,
+        name: String,
+        registrationNumber: String,
+        currentKm: Long,
+    ) = viewModelScope.launch {
+        syncOperation {
+            repository.updateVehicle(vehicle, name, registrationNumber, currentKm)
+        }
+    }
+
+    fun deleteVehicle(vehicle: VehicleEntity) = viewModelScope.launch {
+        syncOperation { repository.deleteVehicle(vehicle) }
+    }
+
+    fun addVehicleRecord(
+        vehicle: VehicleEntity,
+        type: VehicleRecordType,
+        recordDate: Long,
+        nextDueDate: Long,
+        amount: Double?,
+        kmReading: Long,
+        notes: String?,
+    ) = viewModelScope.launch {
+        syncOperation {
+            repository.addVehicleRecord(
+                vehicle,
+                type,
+                recordDate,
+                nextDueDate,
+                amount,
+                kmReading,
+                notes,
+            )
+        }
+    }
+
+    fun deleteVehicleRecord(record: VehicleRecordEntity) = viewModelScope.launch {
+        syncOperation { repository.deleteVehicleRecord(record) }
+    }
+
     fun exportData(uri: Uri) = viewModelScope.launch {
         runCatching { repository.exportData(uri) }
             .onSuccess { _messages.emit("MeterX data exported.") }
@@ -291,7 +346,8 @@ class MeterViewModel(
                 _importPreview.value = null
                 _messages.emit(
                     "Imported ${preview.meterCount} meters, " +
-                        "${preview.readingCount} readings, and ${preview.paymentCount} payments.",
+                        "${preview.readingCount} readings, ${preview.vehicleCount} vehicles, " +
+                        "and ${preview.vehicleRecordCount} vehicle records.",
                 )
             }
             .onFailure {

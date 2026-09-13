@@ -13,6 +13,7 @@ class MeterRepository(
     private val dao = database.meterDao()
 
     val meters: Flow<List<MeterWithReadings>> = dao.observeMeters()
+    val vehicles: Flow<List<VehicleWithRecords>> = dao.observeVehicles()
     val paymentMethods: Flow<List<PaymentMethodEntity>> = dao.observePaymentMethods()
 
     suspend fun addMeter(
@@ -155,8 +156,85 @@ class MeterRepository(
         syncBackup()
     }
 
+    suspend fun addVehicle(name: String, registrationNumber: String, currentKm: Long) {
+        require(name.trim().isNotEmpty()) { "Vehicle name is required." }
+        require(registrationNumber.trim().isNotEmpty()) { "Registration number is required." }
+        require(currentKm >= 0) { "Current km must be zero or more." }
+        dao.insertVehicle(
+            VehicleEntity(
+                name = name.trim(),
+                registrationNumber = registrationNumber.trim().uppercase(),
+                currentKm = currentKm,
+            ),
+        )
+        syncBackup()
+    }
+
+    suspend fun updateVehicle(
+        vehicle: VehicleEntity,
+        name: String,
+        registrationNumber: String,
+        currentKm: Long,
+    ) {
+        require(name.trim().isNotEmpty()) { "Vehicle name is required." }
+        require(registrationNumber.trim().isNotEmpty()) { "Registration number is required." }
+        require(currentKm >= 0) { "Current km must be zero or more." }
+        dao.updateVehicle(
+            vehicle.copy(
+                name = name.trim(),
+                registrationNumber = registrationNumber.trim().uppercase(),
+                currentKm = currentKm,
+            ),
+        )
+        syncBackup()
+    }
+
+    suspend fun deleteVehicle(vehicle: VehicleEntity) {
+        dao.deleteVehicle(vehicle)
+        syncBackup()
+    }
+
+    suspend fun addVehicleRecord(
+        vehicle: VehicleEntity,
+        type: VehicleRecordType,
+        recordDate: Long,
+        nextDueDate: Long,
+        amount: Double?,
+        kmReading: Long,
+        notes: String?,
+    ) {
+        validateVehicleRecord(type, recordDate, nextDueDate, amount, kmReading)
+        database.withTransaction {
+            dao.insertVehicleRecord(
+                VehicleRecordEntity(
+                    vehicleId = vehicle.id,
+                    type = type,
+                    recordDate = recordDate,
+                    nextDueDate = nextDueDate,
+                    amount = amount,
+                    kmReading = kmReading,
+                    notes = notes?.trim()?.takeIf(String::isNotEmpty),
+                ),
+            )
+            if (kmReading > vehicle.currentKm) {
+                dao.updateVehicle(vehicle.copy(currentKm = kmReading))
+            }
+        }
+        syncBackup()
+    }
+
+    suspend fun deleteVehicleRecord(record: VehicleRecordEntity) {
+        dao.deleteVehicleRecord(record)
+        syncBackup()
+    }
+
     suspend fun exportData(uri: Uri) {
-        backup.export(uri, dao.getMetersSnapshot(), dao.getPaymentMethodsSnapshot())
+        backup.export(
+            uri,
+            dao.getMetersSnapshot(),
+            dao.getPaymentMethodsSnapshot(),
+            dao.getVehiclesSnapshot(),
+        )
     }
 
     suspend fun previewImport(uri: Uri): ImportPreview = backup.previewImport(uri)
@@ -168,10 +246,14 @@ class MeterRepository(
             dao.deleteAllPaymentMethods()
             dao.deleteAllReadings()
             dao.deleteAllMeters()
+            dao.deleteAllVehicleRecords()
+            dao.deleteAllVehicles()
             dao.insertMeters(imported.meters)
             dao.insertReadings(imported.readings)
             dao.insertPaymentMethods(imported.paymentMethods)
             dao.insertPaymentRecords(imported.payments)
+            dao.insertVehicles(imported.vehicles)
+            dao.insertVehicleRecords(imported.vehicleRecords)
         }
         syncBackup()
     }
@@ -233,12 +315,18 @@ class MeterRepository(
             dao.deleteAllPaymentMethods()
             dao.deleteAllReadings()
             dao.deleteAllMeters()
+            dao.deleteAllVehicleRecords()
+            dao.deleteAllVehicles()
         }
-        backup.write(emptyList(), emptyList())
+        backup.write(emptyList(), emptyList(), emptyList())
     }
 
     private suspend fun syncBackup() {
-        backup.write(dao.getMetersSnapshot(), dao.getPaymentMethodsSnapshot())
+        backup.write(
+            dao.getMetersSnapshot(),
+            dao.getPaymentMethodsSnapshot(),
+            dao.getVehiclesSnapshot(),
+        )
         if (session.token != null) uploadToCloud()
     }
 
@@ -249,6 +337,7 @@ class MeterRepository(
                 token = token,
                 snapshot = dao.getMetersSnapshot(),
                 paymentMethods = dao.getPaymentMethodsSnapshot(),
+                vehicles = dao.getVehiclesSnapshot(),
             )
         } catch (error: AuthExpiredException) {
             session.clear()
@@ -269,6 +358,8 @@ class MeterRepository(
             dao.deleteAllPaymentMethods()
             dao.deleteAllReadings()
             dao.deleteAllMeters()
+            dao.deleteAllVehicleRecords()
+            dao.deleteAllVehicles()
             dao.insertPaymentMethods(
                 snapshot.paymentMethods.map { method ->
                     PaymentMethodEntity(
@@ -322,8 +413,54 @@ class MeterRepository(
                     )
                 },
             )
+            val localVehicleIdsByClientId = snapshot.vehicles.map { vehicle ->
+                val localId = dao.insertVehicle(
+                    VehicleEntity(
+                        name = vehicle.name,
+                        registrationNumber = vehicle.registrationNumber,
+                        currentKm = vehicle.currentKm,
+                        createdAt = vehicle.createdAt,
+                    ),
+                )
+                vehicle.clientId to localId
+            }.toMap()
+            dao.insertVehicleRecords(
+                snapshot.vehicleRecords.mapNotNull { record ->
+                    val localVehicleId = localVehicleIdsByClientId[record.vehicleClientId]
+                        ?: return@mapNotNull null
+                    VehicleRecordEntity(
+                        vehicleId = localVehicleId,
+                        type = record.type,
+                        recordDate = record.recordDate,
+                        nextDueDate = record.nextDueDate,
+                        amount = record.amount,
+                        kmReading = record.kmReading,
+                        notes = record.notes,
+                        createdAt = record.createdAt,
+                    )
+                },
+            )
         }
-        backup.write(dao.getMetersSnapshot(), dao.getPaymentMethodsSnapshot())
+        backup.write(
+            dao.getMetersSnapshot(),
+            dao.getPaymentMethodsSnapshot(),
+            dao.getVehiclesSnapshot(),
+        )
+    }
+
+    private fun validateVehicleRecord(
+        type: VehicleRecordType,
+        recordDate: Long,
+        nextDueDate: Long,
+        amount: Double?,
+        kmReading: Long,
+    ) {
+        require(nextDueDate >= recordDate) { "Next renewal date cannot be before the record date." }
+        require(amount == null || (amount.isFinite() && amount >= 0)) { "Amount is invalid." }
+        require(type == VehicleRecordType.POLLUTION || amount != null) {
+            "Insurance and service records require an amount."
+        }
+        require(kmReading >= 0) { "Km reading must be zero or more." }
     }
 
     private fun PaymentInput.toRecord(
