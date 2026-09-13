@@ -55,6 +55,8 @@ class MeterViewModel(
     data class AppUpdateUiState(
         val checking: Boolean = false,
         val update: AppUpdateInfo? = null,
+        val checked: Boolean = false,
+        val error: String? = null,
     )
 
     private val _authState = MutableStateFlow(AuthUiState(user = authSession.user.value))
@@ -90,16 +92,7 @@ class MeterViewModel(
         )
 
     init {
-        viewModelScope.launch {
-            _appUpdateState.value = AppUpdateUiState(checking = true)
-            runCatching { repository.checkForAppUpdate(BuildConfig.VERSION_CODE) }
-                .onSuccess { update ->
-                    _appUpdateState.value = AppUpdateUiState(update = update)
-                }
-                .onFailure {
-                    _appUpdateState.value = AppUpdateUiState()
-                }
-        }
+        checkForAppUpdate(showResultMessage = false)
         viewModelScope.launch {
             val existingUser = authSession.user.value
             if (existingUser == null) {
@@ -151,6 +144,10 @@ class MeterViewModel(
             failureMessage = "Cloud sync failed.",
             showSuccessMessage = true,
         )
+    }
+
+    fun checkForAppUpdate() {
+        checkForAppUpdate(showResultMessage = true)
     }
 
     fun clearAuthError() {
@@ -387,6 +384,27 @@ class MeterViewModel(
                     initialized = true,
                     error = error.message ?: "Authentication failed.",
                 )
+            }
+    }
+
+    private fun checkForAppUpdate(showResultMessage: Boolean) = viewModelScope.launch {
+        _appUpdateState.value = _appUpdateState.value.copy(checking = true, error = null)
+        runCatching { repository.checkForAppUpdate(BuildConfig.VERSION_CODE) }
+            .onSuccess { update ->
+                _appUpdateState.value = AppUpdateUiState(update = update, checked = true)
+                if (showResultMessage) {
+                    _messages.emit(
+                        update?.let { "Version ${it.latestVersionName} is available." }
+                            ?: "MeterX is up to date.",
+                    )
+                }
+            }
+            .onFailure { error ->
+                _appUpdateState.value = AppUpdateUiState(
+                    checked = true,
+                    error = error.message ?: "Could not check for updates.",
+                )
+                if (showResultMessage) _messages.emit("Could not check for updates.")
             }
     }
 

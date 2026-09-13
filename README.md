@@ -37,6 +37,7 @@ MongoDB-backed cloud sync service.
 - Track insurance and service amounts, kilometre readings, and optional notes.
 - Review overdue and upcoming vehicle renewals in a dedicated vehicle dashboard.
 - Include vehicle records in local backup, JSON export/import, and cloud sync.
+- Check for app updates manually from Settings and download an available version directly.
 
 ## Cloud sync
 

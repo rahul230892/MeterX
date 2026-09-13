@@ -122,6 +122,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.content.ContextCompat
+import com.meterx.app.BuildConfig
 import com.meterx.app.MeterViewModel
 import com.meterx.app.data.AppUpdateInfo
 import com.meterx.app.data.CustomFieldDefinition
@@ -256,6 +257,11 @@ fun MeterXApp(viewModel: MeterViewModel) {
                 }
             },
             onReminderTimeChange = viewModel::setReminderTime,
+            appUpdateState = appUpdateState,
+            onCheckForUpdate = viewModel::checkForAppUpdate,
+            onDownloadUpdate = { url ->
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            },
         )
     } else if (selectedMeter != null) {
         MeterDetailScreen(
@@ -848,6 +854,9 @@ private fun SettingsScreen(
     onLogout: () -> Unit,
     onReminderEnabledChange: (Boolean) -> Unit,
     onReminderTimeChange: (Int, Int) -> Unit,
+    appUpdateState: MeterViewModel.AppUpdateUiState,
+    onCheckForUpdate: () -> Unit,
+    onDownloadUpdate: (String) -> Unit,
 ) {
     var showTimePicker by rememberSaveable { mutableStateOf(false) }
     var showChangePassword by rememberSaveable { mutableStateOf(false) }
@@ -876,6 +885,20 @@ private fun SettingsScreen(
             contentPadding = PaddingValues(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            item {
+                Text(
+                    "App",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            item {
+                AppUpdateCard(
+                    state = appUpdateState,
+                    onCheck = onCheckForUpdate,
+                    onDownload = onDownloadUpdate,
+                )
+            }
             item {
                 Text(
                     "Notifications",
@@ -987,6 +1010,87 @@ private fun SettingsScreen(
                 showAddPaymentMethod = false
             },
         )
+    }
+}
+
+@Composable
+private fun AppUpdateCard(
+    state: MeterViewModel.AppUpdateUiState,
+    onCheck: () -> Unit,
+    onDownload: (String) -> Unit,
+) {
+    val update = state.update
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+        colors = if (update != null) {
+            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+        } else {
+            CardDefaults.cardColors()
+        },
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Rounded.FileDownload, contentDescription = null)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        if (update != null) "Update available" else "App updates",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        if (update != null) {
+                            "Version ${update.latestVersionName} is ready to download"
+                        } else {
+                            "Installed version ${BuildConfig.VERSION_NAME}"
+                        },
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (state.checking) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                }
+            }
+            if (update != null && update.releaseNotes.isNotBlank()) {
+                Text(update.releaseNotes, style = MaterialTheme.typography.bodySmall)
+            } else if (state.error != null) {
+                Text(
+                    "Could not check right now. Please check your internet connection and try again.",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            } else if (state.checked && !state.checking) {
+                Text(
+                    "You have the latest version.",
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+            if (update != null) {
+                Button(
+                    onClick = { onDownload(update.apkUrl) },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !state.checking,
+                ) {
+                    Icon(Icons.Rounded.FileDownload, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Download version ${update.latestVersionName}")
+                }
+            } else {
+                OutlinedButton(
+                    onClick = onCheck,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !state.checking,
+                ) {
+                    Text(if (state.checking) "Checking…" else "Check for updates")
+                }
+            }
+        }
     }
 }
 
