@@ -1,11 +1,14 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import bcrypt from "bcryptjs";
 import cors from "cors";
 import express from "express";
 import rateLimit from "express-rate-limit";
 import helmet from "helmet";
 import { ZodError } from "zod";
 import { authenticate } from "./auth.js";
+import { deleteAccountAndData } from "./deleteAccount.js";
+import { User } from "./models/User.js";
 import { createAuthRouter } from "./routes/authRoutes.js";
 import { createMeterRouter } from "./routes/meterRoutes.js";
 import { createReadingRouter } from "./routes/readingRoutes.js";
@@ -25,6 +28,7 @@ export function createApp(config) {
     origin: config.CORS_ORIGIN === "*" ? true : config.CORS_ORIGIN.split(","),
   }));
   app.use(express.json({ limit: "5mb" }));
+  app.use(express.urlencoded({ extended: false, limit: "32kb" }));
   app.use(rateLimit({
     windowMs: 15 * 60 * 1000,
     limit: 300,
@@ -34,6 +38,28 @@ export function createApp(config) {
 
   app.get("/health", (_request, response) => {
     response.json({ status: "ok", service: "meterx-backend" });
+  });
+  app.get("/privacy", (_request, response) => {
+    response.sendFile(path.join(publicDirectory, "privacy.html"));
+  });
+  app.get("/account-deletion", (_request, response) => {
+    response.sendFile(path.join(publicDirectory, "account-deletion.html"));
+  });
+  app.post("/account-deletion", async (request, response, next) => {
+    try {
+      const username = String(request.body?.username ?? "").trim().toLowerCase();
+      const password = String(request.body?.password ?? "");
+      const user = await User.findOne({ username }).select("+passwordHash");
+      if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
+        return response.status(401).sendFile(
+          path.join(publicDirectory, "account-deletion-error.html"),
+        );
+      }
+      await deleteAccountAndData(user.id);
+      return response.sendFile(path.join(publicDirectory, "account-deletion-success.html"));
+    } catch (error) {
+      return next(error);
+    }
   });
   app.use("/downloads", express.static(path.join(publicDirectory, "downloads")));
   app.get("/api/app/latest", (_request, response) => {

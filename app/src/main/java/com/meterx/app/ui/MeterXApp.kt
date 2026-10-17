@@ -161,6 +161,7 @@ fun MeterXApp(viewModel: MeterViewModel) {
     val reminderSettings by viewModel.reminderSettings.collectAsStateWithLifecycle()
     val syncStatus by viewModel.syncStatus.collectAsStateWithLifecycle()
     val passwordChanging by viewModel.passwordChanging.collectAsStateWithLifecycle()
+    val accountDeleting by viewModel.accountDeleting.collectAsStateWithLifecycle()
     val appUpdateState by viewModel.appUpdateState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
@@ -234,6 +235,16 @@ fun MeterXApp(viewModel: MeterViewModel) {
             },
             changingPassword = passwordChanging,
             onChangePassword = viewModel::changePassword,
+            deletingAccount = accountDeleting,
+            onDeleteAccount = viewModel::deleteAccount,
+            onOpenPrivacyPolicy = {
+                context.startActivity(
+                    Intent(
+                        Intent.ACTION_VIEW,
+                        Uri.parse("https://meterx-backend.onrender.com/privacy"),
+                    ),
+                )
+            },
             paymentMethods = paymentMethods,
             onAddPaymentMethod = viewModel::addPaymentMethod,
             onDeletePaymentMethod = viewModel::deletePaymentMethod,
@@ -259,8 +270,13 @@ fun MeterXApp(viewModel: MeterViewModel) {
             onReminderTimeChange = viewModel::setReminderTime,
             appUpdateState = appUpdateState,
             onCheckForUpdate = viewModel::checkForAppUpdate,
-            onDownloadUpdate = { url ->
-                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            onDownloadUpdate = {
+                context.startActivity(
+                    Intent(
+                        Intent.ACTION_VIEW,
+                        Uri.parse("https://play.google.com/store/apps/details?id=${BuildConfig.APPLICATION_ID}"),
+                    ),
+                )
             },
         )
     } else if (selectedMeter != null) {
@@ -380,7 +396,10 @@ fun MeterXApp(viewModel: MeterViewModel) {
             update = update,
             onUpdate = {
                 context.startActivity(
-                    Intent(Intent.ACTION_VIEW, Uri.parse(update.apkUrl)),
+                    Intent(
+                        Intent.ACTION_VIEW,
+                        Uri.parse("https://play.google.com/store/apps/details?id=${BuildConfig.APPLICATION_ID}"),
+                    ),
                 )
             },
         )
@@ -397,7 +416,7 @@ private fun MandatoryUpdateDialog(
         title = { Text("Update required") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("A new MeterX version is available and must be installed to continue.")
+                Text("A new MeterX version is available on Google Play and must be installed to continue.")
                 Text(
                     "Latest version: ${update.latestVersionName}",
                     fontWeight = FontWeight.SemiBold,
@@ -417,7 +436,7 @@ private fun MandatoryUpdateDialog(
         },
         confirmButton = {
             Button(onClick = onUpdate) {
-                Text("Download update")
+                Text("Open Google Play")
             }
         },
     )
@@ -848,6 +867,9 @@ private fun SettingsScreen(
     onImport: () -> Unit,
     changingPassword: Boolean,
     onChangePassword: (String, String) -> Unit,
+    deletingAccount: Boolean,
+    onDeleteAccount: (String) -> Unit,
+    onOpenPrivacyPolicy: () -> Unit,
     paymentMethods: List<PaymentMethodEntity>,
     onAddPaymentMethod: (String) -> Unit,
     onDeletePaymentMethod: (PaymentMethodEntity) -> Unit,
@@ -856,10 +878,11 @@ private fun SettingsScreen(
     onReminderTimeChange: (Int, Int) -> Unit,
     appUpdateState: MeterViewModel.AppUpdateUiState,
     onCheckForUpdate: () -> Unit,
-    onDownloadUpdate: (String) -> Unit,
+    onDownloadUpdate: () -> Unit,
 ) {
     var showTimePicker by rememberSaveable { mutableStateOf(false) }
     var showChangePassword by rememberSaveable { mutableStateOf(false) }
+    var showDeleteAccount by rememberSaveable { mutableStateOf(false) }
     var showAddPaymentMethod by rememberSaveable { mutableStateOf(false) }
 
     Scaffold(
@@ -973,6 +996,24 @@ private fun SettingsScreen(
                             Spacer(Modifier.width(8.dp))
                             Text("Sign out")
                         }
+                        TextButton(
+                            onClick = onOpenPrivacyPolicy,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("Privacy policy")
+                        }
+                        TextButton(
+                            onClick = { showDeleteAccount = true },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !deletingAccount,
+                        ) {
+                            Icon(Icons.Rounded.DeleteOutline, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "Delete account and data",
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
                     }
                 }
             }
@@ -1002,6 +1043,17 @@ private fun SettingsScreen(
         )
     }
 
+    if (showDeleteAccount) {
+        DeleteAccountDialog(
+            loading = deletingAccount,
+            onDismiss = { showDeleteAccount = false },
+            onDelete = { password ->
+                onDeleteAccount(password)
+                showDeleteAccount = false
+            },
+        )
+    }
+
     if (showAddPaymentMethod) {
         AddPaymentMethodDialog(
             onDismiss = { showAddPaymentMethod = false },
@@ -1017,7 +1069,7 @@ private fun SettingsScreen(
 private fun AppUpdateCard(
     state: MeterViewModel.AppUpdateUiState,
     onCheck: () -> Unit,
-    onDownload: (String) -> Unit,
+    onDownload: () -> Unit,
 ) {
     val update = state.update
     Card(
@@ -1044,7 +1096,7 @@ private fun AppUpdateCard(
                     )
                     Text(
                         if (update != null) {
-                            "Version ${update.latestVersionName} is ready to download"
+                            "Version ${update.latestVersionName} is available on Google Play"
                         } else {
                             "Installed version ${BuildConfig.VERSION_NAME}"
                         },
@@ -1073,13 +1125,13 @@ private fun AppUpdateCard(
             }
             if (update != null) {
                 Button(
-                    onClick = { onDownload(update.apkUrl) },
+                    onClick = onDownload,
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !state.checking,
                 ) {
                     Icon(Icons.Rounded.FileDownload, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
-                    Text("Download version ${update.latestVersionName}")
+                    Text("Open Google Play")
                 }
             } else {
                 OutlinedButton(
@@ -1177,6 +1229,59 @@ private fun AddPaymentMethodDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
+}
+
+@Composable
+private fun DeleteAccountDialog(
+    loading: Boolean,
+    onDismiss: () -> Unit,
+    onDelete: (String) -> Unit,
+) {
+    var password by rememberSaveable { mutableStateOf("") }
+    var passwordVisible by rememberSaveable { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = { if (!loading) onDismiss() },
+        title = { Text("Delete account and data?") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    "This permanently deletes your MeterX account and all cloud data, " +
+                        "including meters, readings, vehicles, records, and payments. " +
+                        "This cannot be undone.",
+                )
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Current password") },
+                    singleLine = true,
+                    visualTransformation = if (passwordVisible) {
+                        VisualTransformation.None
+                    } else {
+                        PasswordVisualTransformation()
+                    },
+                    trailingIcon = {
+                        PasswordVisibilityButton(
+                            visible = passwordVisible,
+                            onToggle = { passwordVisible = !passwordVisible },
+                        )
+                    },
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onDelete(password) },
+                enabled = !loading && password.length >= 8,
+            ) {
+                Text(if (loading) "Deleting…" else "Permanently delete")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !loading) { Text("Cancel") }
         },
     )
 }

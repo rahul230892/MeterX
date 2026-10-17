@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import { Router } from "express";
 import { authenticate, createToken, toUserResponse } from "../auth.js";
+import { deleteAccountAndData } from "../deleteAccount.js";
 import { User } from "../models/User.js";
 import { changePasswordSchema, credentialsSchema } from "../validation.js";
 
@@ -67,6 +68,21 @@ export function createAuthRouter(config) {
         token: createToken(user, config),
         user: toUserResponse(user),
       });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.delete("/account", authenticate(config), async (request, response, next) => {
+    try {
+      const password = String(request.body?.password ?? "");
+      const user = await User.findById(request.user.id).select("+passwordHash");
+      if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
+        return response.status(401).json({ error: "Current password is incorrect." });
+      }
+
+      await deleteAccountAndData(user.id);
+      return response.status(204).send();
     } catch (error) {
       return next(error);
     }

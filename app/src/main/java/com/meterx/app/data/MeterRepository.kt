@@ -308,6 +308,12 @@ class MeterRepository(
         }
     }
 
+    suspend fun deleteAccount(password: String) {
+        val token = session.token ?: throw AuthExpiredException("Session expired.")
+        api.deleteAccount(token, password)
+        logout()
+    }
+
     suspend fun logout() {
         session.clear()
         database.withTransaction {

@@ -67,6 +67,8 @@ class MeterViewModel(
     val syncStatus: StateFlow<SyncStatus> = _syncStatus.asStateFlow()
     private val _passwordChanging = MutableStateFlow(false)
     val passwordChanging: StateFlow<Boolean> = _passwordChanging.asStateFlow()
+    private val _accountDeleting = MutableStateFlow(false)
+    val accountDeleting: StateFlow<Boolean> = _accountDeleting.asStateFlow()
     private val _appUpdateState = MutableStateFlow(AppUpdateUiState())
     val appUpdateState: StateFlow<AppUpdateUiState> = _appUpdateState.asStateFlow()
 
@@ -177,6 +179,20 @@ class MeterViewModel(
                 }
             }
         _passwordChanging.value = false
+    }
+
+    fun deleteAccount(password: String) = viewModelScope.launch {
+        _accountDeleting.value = true
+        runCatching { repository.deleteAccount(password) }
+            .onSuccess {
+                _authState.value = AuthUiState(initialized = true)
+                _syncStatus.value = SyncStatus.SYNCED
+                _messages.emit("Your MeterX account and cloud data were deleted.")
+            }
+            .onFailure { error ->
+                _messages.emit(error.message ?: "Could not delete the account.")
+            }
+        _accountDeleting.value = false
     }
 
     fun addMeter(

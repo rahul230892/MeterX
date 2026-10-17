@@ -118,6 +118,15 @@ class MeterApi(baseUrl: String) {
         response.toAuthResult()
     }
 
+    suspend fun deleteAccount(token: String, password: String) = withContext(Dispatchers.IO) {
+        request(
+            method = "DELETE",
+            path = "/api/auth/account",
+            token = token,
+            body = JSONObject().put("password", password),
+        )
+    }
+
     suspend fun latestAppVersion(): AppUpdateInfo = withContext(Dispatchers.IO) {
         val response = request("GET", "/api/app/latest")
         AppUpdateInfo(

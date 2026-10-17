@@ -12,10 +12,10 @@ const schema = z.object({
   APP_LATEST_VERSION_NAME: z.string().default("1.10"),
   APP_MIN_SUPPORTED_VERSION_CODE: z.coerce.number().int().positive().default(9),
   APP_APK_URL: z.string().url().default(
-    "https://meterx-backend.onrender.com/downloads/meterx-latest.apk",
+    "https://play.google.com/store/apps/details?id=com.mosquitodevs.meterX",
   ),
   APP_RELEASE_NOTES: z.string().default(
-    "Add a Settings update checker with direct download access, plus vehicle tracking and renewal alerts.",
+    "Update MeterX securely through Google Play.",
   ),
 });
 

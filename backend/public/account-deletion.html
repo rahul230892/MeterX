@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Delete your MeterX account</title>
+  <style>body{font:16px/1.6 system-ui,sans-serif;max-width:620px;margin:48px auto;padding:0 20px;color:#202124}label{display:block;margin:18px 0 6px}input{box-sizing:border-box;width:100%;padding:12px;font:inherit}button{margin-top:24px;padding:12px 18px;font:inherit;background:#b3261e;color:white;border:0;border-radius:8px}a{color:#0b57d0}</style>
+</head>
+<body>
+  <h1>Delete your MeterX account</h1>
+  <p>This permanently deletes your MeterX account and all associated cloud data, including meters, readings, payments, vehicles, and renewal records. This cannot be undone. Data stored only on a device is removed when you clear the app's storage or uninstall it.</p>
+  <form method="post" action="/account-deletion">
+    <label for="username">Username</label>
+    <input id="username" name="username" autocomplete="username" required minlength="3" maxlength="64">
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" required minlength="8" maxlength="128">
+    <button type="submit">Permanently delete account</button>
+  </form>
+  <p><a href="/privacy">Read the MeterX Privacy Policy</a></p>
+</body>
+</html>

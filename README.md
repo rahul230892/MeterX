@@ -37,7 +37,7 @@ MongoDB-backed cloud sync service.
 - Track insurance and service amounts, kilometre readings, and optional notes.
 - Review overdue and upcoming vehicle renewals in a dedicated vehicle dashboard.
 - Include vehicle records in local backup, JSON export/import, and cloud sync.
-- Check for app updates manually from Settings and download an available version directly.
+- Check for app updates manually from Settings and install them securely through Google Play.
 
 ## Cloud sync
 
@@ -81,7 +81,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
 Data is retained because updates keep the same application ID
-(`com.meterx.app`), signing key, database name, and compatible Room schema.
+(`com.mosquitodevs.meterX`), signing key, database name, and compatible Room schema.
 Do not uninstall the app or clear its storage before installing the update.
 
 ## Moving data between devices
