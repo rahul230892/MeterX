@@ -473,8 +473,10 @@ class MeterRepository(
         meterId: Long,
         readingId: Long,
         existing: PaymentRecordEntity? = null,
-    ): PaymentRecordEntity =
-        PaymentRecordEntity(
+    ): PaymentRecordEntity {
+        require(amount.isFinite() && amount >= 0) { "Bill amount must be zero or more." }
+        require(methodName.isNotBlank()) { "Payment option is required." }
+        return PaymentRecordEntity(
             id = existing?.id ?: 0,
             meterId = meterId,
             readingId = readingId,
@@ -483,6 +485,7 @@ class MeterRepository(
             methodName = methodName.trim(),
             createdAt = existing?.createdAt ?: System.currentTimeMillis(),
         )
+    }
 
     private fun mergeCustomFields(
         existing: List<CustomFieldDefinition>,

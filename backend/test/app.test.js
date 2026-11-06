@@ -159,6 +159,46 @@ test("snapshot validation rejects payments for unbilled readings", () => {
   assert.equal(result.success, false);
 });
 
+test("snapshot validation accepts a zero-amount bill", () => {
+  const snapshot = snapshotSchema.parse({
+    meters: [
+      {
+        clientId: "1",
+        nickname: "Home",
+        type: "ELECTRICITY",
+        meterNumber: "M-1",
+        consumerNumber: null,
+        freeUnits: 200,
+        cycleBaseline: 1000,
+        createdAt: 1710000000000,
+      },
+    ],
+    readings: [
+      {
+        clientId: "10",
+        meterClientId: "1",
+        value: 1025,
+        readingDate: 20500,
+        isBilled: true,
+        createdAt: 1710000000000,
+      },
+    ],
+    payments: [
+      {
+        clientId: "30",
+        meterClientId: "1",
+        readingClientId: "10",
+        amount: 0,
+        paymentDate: 20502,
+        methodName: "Free allowance",
+        createdAt: 1710000000000,
+      },
+    ],
+  });
+
+  assert.equal(snapshot.payments[0].amount, 0);
+});
+
 test("snapshot validation keeps custom columns scoped to their meter", () => {
   const result = snapshotSchema.safeParse({
     meters: [
