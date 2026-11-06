@@ -2542,7 +2542,7 @@ private fun ReadingDialog(
     val parsedValue = value.toDoubleOrNull()
     val parsedPaymentAmount = paymentAmount.toDoubleOrNull()
     val paymentValid = !billed ||
-        (parsedPaymentAmount != null && parsedPaymentAmount > 0 && selectedMethod.isNotBlank())
+        (parsedPaymentAmount != null && parsedPaymentAmount >= 0 && selectedMethod.isNotBlank())
     val customValuesValid = customValues.values.all { it.trim().length <= 240 }
     val valid = parsedValue != null && parsedValue >= 0 && paymentValid && customValuesValid
 
@@ -2619,7 +2619,7 @@ private fun ReadingDialog(
                             prefix = { Text("₹") },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             isError = attempted &&
-                                (parsedPaymentAmount == null || parsedPaymentAmount <= 0),
+                                (parsedPaymentAmount == null || parsedPaymentAmount < 0),
                             singleLine = true,
                         )
                         OutlinedButton(
@@ -2661,7 +2661,7 @@ private fun ReadingDialog(
                         }
                         if (attempted && !paymentValid) {
                             Text(
-                                "Enter the paid amount and payment app.",
+                                "Enter a zero or positive bill amount and payment app.",
                                 color = MaterialTheme.colorScheme.error,
                                 style = MaterialTheme.typography.bodySmall,
                             )

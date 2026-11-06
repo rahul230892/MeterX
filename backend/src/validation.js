@@ -95,7 +95,7 @@ export const paymentSchema = z.object({
   clientId: z.union([z.string(), z.number()]).transform(String),
   meterClientId: z.union([z.string(), z.number()]).transform(String),
   readingClientId: z.union([z.string(), z.number()]).transform(String),
-  amount: z.number().positive(),
+  amount: z.number().nonnegative(),
   paymentDate: z.number().int(),
   methodName: z.string().trim().min(1).max(120),
   createdAt: z.number().int().nonnegative(),

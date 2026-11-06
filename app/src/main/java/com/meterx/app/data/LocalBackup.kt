@@ -330,7 +330,7 @@ class LocalBackup(private val context: Context) {
                         paymentIds.add(paymentId) &&
                         readingIds.contains(readingId) &&
                         amount.isFinite() &&
-                        amount > 0 &&
+                        amount >= 0 &&
                         methodName.isNotEmpty(),
                 ) {
                     "A payment record is incomplete or duplicated."
